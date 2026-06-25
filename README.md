@@ -24,6 +24,15 @@ This framework serves as the ingestion layer for the Sales-Intelligence-Pipeline
 
 ### Problem Statement 
 
+With a typical approach to ETL workflows, a Python script is written for each data source. Even if each script works: each one is slightly different, handles errors differently, logs differently, retries differently. 
+Every new data source requires starting from scratch. There is no shared contract for what an "extractor" is. You cannot swap out sources without rewriting the pipeline that uses them. 
+<br>
+
+***A framework solves this problem by defining a shared structure and enforced interface contracts:*** 
+- Every extractor behaves predictably regardless of the source 
+- New sources can be added without changing downstream code 
+- Cross-cutting concerns are written once and inherited everywhere 
+<br> 
 
 **Goals:**
 - Abstract common ingestion patterns (REST API, file I/O) behind a consistent interface 
