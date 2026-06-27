@@ -62,8 +62,8 @@ python-etl-framework/
 │   │   └── loader.py               # BaseLoader ABC 
 │   ├── extractors/
 │   │   ├── __init__.py
-│   │   ├── api_extractor.py        # REST API with pagination + retry
-│   │   └── file_extractor.py       # CSV / Parquet file reader 
+│   │   ├── rest_api.py             # REST API with pagination + retry
+│   │   └── csv.py                  # CSV / Parquet file reader 
 │   ├── transformers/
 │   │   ├── __init__.py
 │   │   └── crm_transformer.py      # CRM record cleaning + type casting
@@ -96,7 +96,7 @@ python-etl-framework/
 │   └── test_pipeline_runner.py
 │
 ├── examples/
-│   └── run_crm_ingestion.py        # End-to-end usage example 
+│   └── api_to_parquet.py           # End-to-end usage example 
 │
 ├── pyproject.toml                  # Package config + dependencies
 ├── .gitignore
