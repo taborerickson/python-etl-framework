@@ -1,16 +1,14 @@
 # Python ETL Framework - Modular Ingestion Library
 
+> **Status: Active Development** - Core framework components are being built incrementally. 
+> REference the [implementation status](#implementation-status) table below.
+
 ---
 
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
 Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and full unit test coverage. 
 
-This framework serves as the ingestion layer for the [Sales-Intelligence-Pipeline](https://github.com/taborerickson/sales-intelligence-pipeline) project. 
-
-<br>
-
-> **Status: Active Development** - Core framework components are being built incrementally. 
-> Reference the [implementation status](#project-structure) in the project structure below. 
+This framework serves as the ingestion layer for the [Sales-Intelligence-Pipeline](https://github.com/taborerickson/sales-intelligence-pipeline) project - a medallion-architecture ETL pipeline with dbt, Airflow, and a RAG/AI layer. The Sales Intelligence Pipeline project's Bronze ingestion layer imports directly from this library. 
 
 ---
 
@@ -18,6 +16,7 @@ This framework serves as the ingestion layer for the [Sales-Intelligence-Pipelin
 - [Problem Statement](#problem-statement)
 - [Architecture](#architecture) 
 - [Project Structure](#project-structure) 
+- [Implementation Status](#implementation-status) 
 - [Key Design Patterns](#key-design-patterns) 
 - [Installation](#installation)  
 - [Usage](#usage)  
@@ -53,6 +52,17 @@ Every new data source requires starting from scratch. There is no shared contrac
 
 > **In progress** - Architecture diagram will be added once the core extractor and loader components are complete. Will cover: ingestion layer, config flow, retry decorator, structured logging, and the relationship to the Sales Intelligence Pipeline Bronze layer. 
 
+**How this framework relates to the spine project:**
+
+```
+python-etl-framework -> imported by sales-intelligence-pipeline 
+
+BaseExtractor (ABC) -> Bronze layer ingestion tasks 
+RestApiExtractor -> CRM API ingestion 
+RetryConfig, APIConfig -> Config-driven Airflow task runs 
+configure_logging() -> Structured observability across all layers 
+```
+
 ---
 
 ## Project Structure 
@@ -77,13 +87,13 @@ python-etl-framework/
 │   │   └── retry.py                # Exponential backoff retry decorator - in progress
 │   ├── config/
 │   │   ├── __init__.py
-│   │   └── models.py               # Pydantic config models - in progress 
+│   │   └── models.py               # Pydantic config models - Complete
 │   ├── exceptions/
 │   │   ├── __init__.py
 │   │   └── pipeline_errors.py      # Custom exception hierarchy - Complete
 │   └── logging/
 │       ├── __init__.py
-│       └── logger.py               # structlog setup - in progress 
+│       └── logger.py               # structlog setup - Complete  
 │
 ├── tests/
 │   ├── __init__.py
@@ -106,7 +116,7 @@ python-etl-framework/
 | `exceptions/pipeline_errors.py` - custom exception hierarchy | COMPLETE | 
 | `tests/test_exceptions.py` - exception hierarchy smoke tests | COMPLETE | 
 | `config/models.py` - Pydantic config models | COMPLETE | 
-| `logging/logger.py` - structlog setup | Planned | 
+| `logging/logger.py` - structlog setup | COMPLETE | 
 | `decorators/retry.py` - retry decorator | Planned | 
 | `base/extractor.py` - BaseExtractor (ABC) | Planned | 
 | `extractors/rest_api.py` - RestApiExtractor | Planned | 
@@ -152,7 +162,11 @@ A decorator wraps `extract()` with configurable retry logic. Transient failures 
 All runtime configuration is validated at instantiation time using Pydantic `BaseModel`. Bad values (missing required fields, invalid types, constraint violations) raise `ValidationError` before any pipeline code runs (fail early, fail fast). Config objects are the single source of truth for extractor behavior. 
 
 ### 7. Structured Logging via `structlog` 
-All log output is emitted as key-value pairs rather than unstructured strings. Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_run_id` to its logger at initialization. Every subsequent log line from that instance includes those fields automatically. Output is suitable for ingestion by observability tools. 
+All log output is emitted as key-value pairs rather than unstructured strings. `configure_logging()` is called once at application startup and supports two output modes: 
+- **Development:** colorized, human-readable console output via `ConsoleRenderer`
+- **Production:** single-line JSON output per event via `JSONRenderer`, suitable for ingestion by Datadog, Splunk, CloudWatch, or equivalent 
+
+Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_run_id` to its logger at initialization. Every subsequent log line from that instance includes those fields automatically. 
 
 ---
 
@@ -180,6 +194,18 @@ pip show etl-framework
 ### Usage 
 
 > **In progress** - Usage examples will be added once `RestApiExtractor` and `ParquetLoader` are complete. The example below shows the intended and planned interface. 
+
+**Configure logging at application startup:**
+
+```python 
+from etl_framework.logging.logger import configure_logging
+
+# Development — colorized, human-readable output
+configure_logging(level="INFO", environment="development")
+
+# Production — single-line JSON output
+configure_logging(level="INFO", environment="production")
+```
 
 **Use the framework in your own pipeline:**
 
@@ -221,7 +247,7 @@ Config models are Pydantic `BaseModel` subclasses defined in `etl_framework/conf
 | `APIConfig` | `ExtractorConfig` | `url` (required), `auth_token` (required), `page_size` (default: 100), `timeout_seconds` (default: 30) | 
 | `CSVConfig` | `ExtractorConfig` | `file_path` (required), `delimiter` (default: `","`), `encoding` (default: `"utf-8"`) | 
 
-**Example: instantiating `APIConfig` with custom retry behavior:**
+**Example: `APIConfig` with custom retry behavior:**
 
 ```python 
 from etl_framework.config.models import APIConfig, RetryConfig
@@ -292,9 +318,10 @@ The retry decorator is not specific to extractors. When loaders gain retry logic
 ### Config passed into `__init__`, not `extract()`
 Extractor configuration (URL, auth token, page size) is passed at instantiation, not at call time. This makes the extractor self-contained and allows `run()` to be called with no arguments. This is the intended and planned interface for Airflow task wrappers. 
 
---- 
+### `configure_logging()` is called by the application, not by the framework
+`BaseExtractor` does not call `configure_logging()` internally. Calling it inside `BaseExtractor.__init__()` would reconfigure the global logging state every time an extractor is instantiated.
 
-<div align="center">
+--- 
 
 ## Skills Demonstrated 
 
@@ -311,8 +338,6 @@ Extractor configuration (URL, auth token, page size) is passed at instantiation,
 | Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` | 
 | `raise ... from e` exception chaining | All extractors | 
 
-</div>
-
 <br> 
 
 ---
@@ -321,6 +346,6 @@ Extractor configuration (URL, auth token, page size) is passed at instantiation,
 
 <div align="center">
 
-***Author: Tabor Erickson | [LinkedIn](#) | [GitHub](#)***
+***Author: Tabor Erickson | [LinkedIn](https://www.linkedin.com/in/taborerickson) | [GitHub](https://github.com/taborerickson)***
 
 </div>
