@@ -2,53 +2,60 @@
 
 ---
 
-The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. Rather than a collection of scripts, it is a structured library with abstract base classes, concrete implementations, configuration management, retry logic, structured logging, and full unit test coverage. 
+The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
+Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and full unit test coverage. 
 
-This framework serves as the ingestion layer for the Sales-Intelligence-Pipeline project. 
+This framework serves as the ingestion layer for the [Sales-Intelligence-Pipeline](https://github.com/taborerickson/sales-intelligence-pipeline) project. 
+
+<br>
+
+> **Status: Active Development** - Core framework components are being built incrementally. 
+> Reference the [implementation status](#project-structure) in the project structure below. 
 
 ---
 
 ## Table of Contents 
-- Problem Statement 
-- Architecture 
-- Project Structure 
-- Key Design Patterns 
-- Installation 
-- Usage 
-- Configuration 
-- Running Tests 
-- Key Design Decisions & Trade-offs 
-- Demonstrated Skills 
+- [Problem Statement](#problem-statement)
+- [Architecture](#architecture) 
+- [Project Structure](#project-structure) 
+- [Key Design Patterns](#key-design-patterns) 
+- [Installation](#installation)  
+- [Usage](#usage)  
+- [Configuration](#configuration)  
+- [Running Tests](#running-tests) 
+- [Key Design Decisions & Trade-offs](#key-design-decisions--trade-offs) 
+- [Skills Demonstrated](#skills-demonstrated) 
 
 ---
 
-### Problem Statement 
+## Problem Statement 
 
-With a typical approach to ETL workflows, a Python script is written for each data source. Even if each script works: each one is slightly different, handles errors differently, logs differently, retries differently. 
+With a typical approach to ETL workflows, a Python script is written for each data source. Even if each script works: each one is slightly different, handles errors differently, logs differently, and retries differently. 
 Every new data source requires starting from scratch. There is no shared contract for what an "extractor" is. You cannot swap out sources without rewriting the pipeline that uses them. 
 <br>
 
-***A framework solves this problem by defining a shared structure and enforced interface contracts:*** 
-- Every extractor behaves predictably regardless of the source 
-- New sources can be added without changing downstream code 
-- Cross-cutting concerns are written once and inherited everywhere 
+**A framework solves this problem by defining a shared structure and enforced interface contracts:** 
+- Every extractor behaves predictably regardless of the source type
+- New sources can be added by subclassing `BaseExtractor`, without changing downstream code 
+- Cross-cutting concerns (retry logic, logging, error handling) are written once and inherited everywhere 
 <br> 
 
 **Goals:**
 - Abstract common ingestion patterns (REST API, file I/O) behind a consistent interface 
 - Handle failures gracefully with configurable retry logic and exponential backoff 
+- Classify failures as transient (retryable) or permanent (non-retryable) to avoid wasted retries 
 - Emit structured, machine-readable logs suitable for observability tooling 
-- Be importable as a reusable package 
+- Be installable and importable as a reusable package by downstream pipelines 
 
 ---
 
-### Architecture 
+## Architecture 
 
-> Placeholder: Insert structured architecture diagram here 
+> **In progress** - Architecture diagram will be added once the core extractor and loader components are complete. Will cover: ingestion layer, config flow, retry decorator, structured logging, and the relationship to the Sales Intelligence Pipeline Bronze layer. 
 
 ---
 
-### Project Structure 
+## Project Structure 
 
 ```text
 python-etl-framework/
@@ -57,131 +64,225 @@ python-etl-framework/
 │   ├── __init__.py
 │   ├── base/
 │   │   ├── __init__.py
-│   │   ├── extractor.py            # BaseExtractor ABC
-│   │   ├── transformer.py          # BaseTransformer ABC
-│   │   └── loader.py               # BaseLoader ABC 
+│   │   └── extractor.py            # BaseExtractor ABC - in progress 
 │   ├── extractors/
 │   │   ├── __init__.py
-│   │   ├── rest_api.py             # REST API with pagination + retry
-│   │   └── csv.py                  # CSV / Parquet file reader 
-│   ├── transformers/
-│   │   ├── __init__.py
-│   │   └── crm_transformer.py      # CRM record cleaning + type casting
+│   │   ├── rest_api.py             # RestApiExtractor - in progress 
+│   │   └── csv.py                  # CSVExtractor - in progress
 │   ├── loaders/
 │   │   ├── __init__.py
-│   │   └── parquet_loader.py       # Local Parquet writer 
+│   │   └── parquet_loader.py       # ParquetLoader - in progress  
 │   ├── decorators/
 │   │   ├── __init__.py
-│   │   ├── retry.py                # Exponential backoff retry decorator
-│   │   ├── timer.py                # Execution timer decorator 
-│   │   └── logging_decorator.py    # Structured log entry/exit decorator
+│   │   └── retry.py                # Exponential backoff retry decorator - in progress
 │   ├── config/
 │   │   ├── __init__.py
-│   │   └── models.py               # Pydantic config + record schemas 
+│   │   └── models.py               # Pydantic config models - in progress 
 │   ├── exceptions/
 │   │   ├── __init__.py
-│   │   └── pipeline_errors.py      # Custom exception hierarchy 
-│   ├── logging/
-│   │   ├── __init__.py
-│   │   └── logger.py               # structlog setup 
-│   └── runner.py                   # PipelineRunner orchestration class 
+│   │   └── pipeline_errors.py      # Custom exception hierarchy - Complete
+│   └── logging/
+│       ├── __init__.py
+│       └── logger.py               # structlog setup - in progress 
 │
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py                 # Shared fixtures
-│   ├── test_api_extractor.py
-│   ├── test_crm_transformer.py
-│   ├── test_parquet_loader.py
-│   ├── test_retry_decorator.py
-│   └── test_pipeline_runner.py
+│   └── test_exceptions.py          # Exception hierarchy tests - Complete
 │
 ├── examples/
-│   └── api_to_parquet.py           # End-to-end usage example 
+│   └── api_to_parquet.py           # End-to-end usage example - in progress
 │
-├── pyproject.toml                  # Package config + dependencies
+├── pyproject.toml                  # Package config + dependencies - Complete
 ├── .gitignore
 └── README.md
 ```
 
+**Implementation status:**
+
+| Component | Status | 
+|---|---|
+| `pyproject.toml` - package config, dependencies, tooling | COMPLETE | 
+| `exceptions/pipeline_errors.py` - custom exception hierarchy | COMPLETE | 
+| `tests/test_exceptions.py` - exception hierarchy smoke tests | COMPLETE | 
+| `config/models.py` - Pydantic config models | In Progress | 
+| `logging/logger.py` - structlog setup | Planned | 
+| `decorators/retry.py` - retry decorator | Planned | 
+| `base/extractor.py` - BaseExtracrot (ABC) | Planned | 
+| `extractors/rest_api.py` - RestApiExtractor | Planned | 
+| `extractors/csv.py` - CSVExtractor | Planned | 
+| `loaders/parquet_loader.py` - ParquetLoader | Planned | 
+| `examples/api_to_parquet.py` - end-to-end example | Planned | 
+
 ---
 
-### Key Design Patterns 
+## Key Design Patterns 
 
-1. **Abstract Base Classes (ABC)** <br>
-All extractors, transformers, and loaders inherit from an abstract base class that enforces a consistent interface. Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Noting else changes downstream. 
+### 1. Abstract Base Classes (ABC) 
+All extractors, transformers, and loaders inherit from an abstract base class that enforces a consistent interface. 
+`BaseExtractor` declares `extract()` as an abstract method. Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Noting else changes downstream. 
 
-2. **Retry Decorators with Exponential Backoff** <br>
+### 2. Template Method Pattern 
+`BaseExtractor.run()` is a concrete method that handles shared orchestration: logging pipeline start, calling `extract()`, logging completion, and handling exceptions. Subclasses implement only `extract()`. The orchestration logic is written once. 
 
-3. **Generator-Based Streaming** 
+### 3. Custom Exception Hierarchy 
+Exceptions are classified as **transient** (retryable: network timeout, rate limit, 5xx) or **permanent** (non-retryable: 401, 404, malformed response). The retry decorator uses `isinstance()` checks against the hierarchy to check which branch of the hierarchy it belongs to. 
 
-4. **Pydantic Configuration and Record Schemas**
+```
+PipelineError
+├── ExtractionError
+│   ├── TransientExtractionError   → retried with exponential backoff
+│   │   ├── NetworkError
+│   │   ├── RateLimitError
+│   │   └── ServerError
+│   └── PermanentExtractionError   → re-raised immediately, no retry
+│       ├── AuthenticationError
+│       ├── MalformedResponseError
+│       └── SourceNotFoundError
+└── MaxRetriesExceededError        → raised when retry attempts are exhausted
+```
 
-5. **Custom Exception Hierarchy**
+### 4. Retry Decorator with Exponential Backoff 
+A decorator wraps `extract()` with configurable retry logic. Transient failures trigger a wait (backoff * attempt seconds) before retrying. Permanent failures are re-raised immediately. When all attempts are exhausted, `MaxRetriesExceededError` is raise, which carries the operation name, attempt count, total duration, and the last underlying exception. 
 
-6. **Structured Logging via `structlog`**
+### 5. Generator-Based Streaming 
+`extract()` returns a `Generator[Dict[str, Any], None, None]` rather than loading all records into memory. Records are yielded one at a time and consumed by the loader, keeping memory usage constant regardless of the dataset size. 
+
+### 6. Pydantic Configuration 
+All runtime configuration is validated at instantiation time using Pydantic `BaseModel`. Bad values (missing required fields, invalid types, constraint violations) raise `ValidationError` before any pipeline code runs (fail early, fail fast). Config objects are the single source of truth for extractor behavior. 
+
+### 7. Structured Logging via `structlog` 
+All log output is emitted as key-value pairs rather than unstructured strings. Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_run_id` to its logger at initializaion. Every subsequent log line from that instance includes those fields automatically. Output is suitable for ingestion by observability tools. 
 
 ---
 
-### Installation 
+## Installation 
 
 **Prerequisites**: 
+- Python 3.11+
+- Git 
+
+**Clone the repo and install in editable mode:**
 
 ```powershell
+git clone https://github.com/taborerickson/python-etl-framework.git
+cd python-etl-framework 
 
+# install in editable mode with dev dependencies (pytest, ruff) 
+pip install -e ".[dev]"
+
+# verify the install 
+pip show etl-framework 
 ```
 
 ---
 
 ### Usage 
 
-**Run the Example Pipeline** <br>
+> **In progress** - Usage examples will be added once `RestApiExtractor` and `ParquetLoader` are complete. The example below shows the intended and planned interface. 
 
-```powershell
+**Use the framework in your own pipeline:**
 
+```python 
+from etl_framework.extractors.rest_api import RestApiExtractor
+from etl_framework.config.models import APIConfig, RetryConfig
+
+config = APIConfig(
+    source_name="crm_contacts_api",
+    pipeline_run_id="run_20260626_001",
+    url="https://api.example.com/contacts",
+    auth_token="your_token_here",
+    page_size=100,
+    retry_config=RetryConfig(max_retries=3, backoff_factor=2.0)
+)
+
+extractor = RestApiExtractor(config)
+extractor.run()  # handles retry, logging, and error classification automatically
 ```
 
-**Use the Framework in Your Own Pipeline**
+**Run the end-to-end example** *(once complete)*:
 
-```python
-
+```powershell
+python examples/api_to_parquet.py 
 ```
 
 --- 
 
 ### Configuration 
 
+> **In progress** - Full configuration reference will be added once `config/models.py` is complete. Config models are Pydantic `BaseModel` subclasses. All fields are validated at instantiation. The following config classes are planned: 
+
+| Config Class | Purpose | 
+|---|---| 
+| `RetryConfig` | `max_retries`, `backoff_factor` - shared by extractors and loaders | 
+| `ExtractorConfig` | Base config: `source_name`, `pipeline_run_id`, nested `RetryConfig` | 
+| `APIConfig` | Extends `ExtractorConfig`: `url`, `headers`, `timeout`, `page_size`, `auth_token` | 
+| `CSVConfig` | Extends `ExtractorConfig`: `file_path`, `delimiter`, `encoding` | 
+
 ---
 
 ### Running Tests 
 
 ```powershell
+# Run all tests 
+pytest 
 
+# Run with coverage report 
+pytest --cov=etl_framework --cov-report=term-missing 
+
+# Run a specific test file 
+pytest tests/test_exceptions.py -v 
 ```
+
+**Current test coverage:**
+
+| Test File | What It Covers | Status | 
+|---|---|---| 
+| `tests/test_exceptions.py` | Exception hierarchy: inheritance, `isinstance()` checks, `MaxRetriesExceededError.__str__()` | COMPLETE | 
+| `tests/test_retry_decorator.py` | Retry logic: backoff, transient vs. permanent, exhaustion | Planned | 
+| `tests/test_api_extractor.py` | `RestApiExtractor`: extraction, pagination, exception translation | Planned | 
+| `tests/test_parquet_loader.py` | `ParquetLoader`: file output, schema validation | Planned | 
+| `tests/conftest.py` | Shared fixtures | Planned | 
 
 ---
 
-### Key Design Decisions & Trade-offs 
+## Key Design Decisions & Trade-offs 
+
+### Generator-based `extract()` over returning a list 
+`extract()` yields records one at a time rather than loading all records into a list and returning it. This keeps memory usage flat regardless of dataset size. The trade-off is that generators are consumed once and cannot be rewound. Callers that need to inspect records multiple times must materialize into a list themselves. 
+
+### Transient/permanent exception classification 
+Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it
+
+### `MaxRetriesExceededError` sits under `PipelineError`, not `ExtractionError` 
+The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. 
+
+### Pydantic over dataclasses for config 
+`@dataclass` provides structure but no validation. Pydantic validates field types and constraints at instantiation. A misconfigured `APIConfig` raises `ValidationError` before any network call is made. The trade-off is a heavier dependency, which is acceptable here because Pydantic is already widely used. 
+
+### Config passed into `__init__`, not `extract()`
+Extractor configuration (URL, auth token, page size) is passed at instantiation, not at call time. This makes the extractor self-contained and allows `run()` to be called with no arguments. This is the intended and planned interface for Airflow task wrappers. 
 
 --- 
 
-<center> 
+<div align="center">
 
-### Skills Demonstrated 
+## Skills Demonstrated 
 
 | Skill | Where | 
 |---|---|
-| Python OOP: ABC, inheritance, composition | --- | 
-| Decorators: retry, timer, logging | --- | 
-| Generators: memory-efficient streaming | --- | 
-| Type hints | --- | 
-| Pydantic: config validation + record schemas | --- | 
-| Custom exception hierarchy | --- | 
-| Context managers | --- | 
-| Unit testing: pytest, mocking, fixtures | --- | 
-| Structured logging: structlog | --- | 
-| Package structure: pyproject.toml | --- | 
+| Python OOP: ABC, inheritance, Template Method pattern | `base/extractor.py`, all extractors |
+| Custom exception hierarchy with `isinstance()` classification | `exceptions/pipeline_errors.py` | 
+| Decorators: retry with exponential backoff | `decorators/retry.py` | 
+| Generators: memory-efficient record streaming | `BaseExtractor.extract()` |
+| Type hints throughout | All modules | 
+| Pydantic: config validation, nested modules, field validators | `config/models.py` | 
+| Structured logging: context binding, key-value output | `logging/logger.py`, `BaseExtractor` | 
+| Unit testing: pytest, mocking, fixtures | `tests/` | 
+| Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` | 
+| `raise ... from e` exception chaining | All extractors | 
 
-</center> 
+</div>
 
 <br> 
 
@@ -189,8 +290,8 @@ All extractors, transformers, and loaders inherit from an abstract base class th
 
 <br> 
 
-<center> 
+<div align="center">
 
-***Author: Tabor Erickson | LinkedIn | GitHub***
+***Author: Tabor Erickson | [LinkedIn](#) | [GitHub](#)***
 
-</center> 
+</div>
