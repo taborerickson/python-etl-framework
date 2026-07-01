@@ -105,10 +105,10 @@ python-etl-framework/
 | `pyproject.toml` - package config, dependencies, tooling | COMPLETE | 
 | `exceptions/pipeline_errors.py` - custom exception hierarchy | COMPLETE | 
 | `tests/test_exceptions.py` - exception hierarchy smoke tests | COMPLETE | 
-| `config/models.py` - Pydantic config models | In Progress | 
+| `config/models.py` - Pydantic config models | COMPLETE | 
 | `logging/logger.py` - structlog setup | Planned | 
 | `decorators/retry.py` - retry decorator | Planned | 
-| `base/extractor.py` - BaseExtracrot (ABC) | Planned | 
+| `base/extractor.py` - BaseExtractor (ABC) | Planned | 
 | `extractors/rest_api.py` - RestApiExtractor | Planned | 
 | `extractors/csv.py` - CSVExtractor | Planned | 
 | `loaders/parquet_loader.py` - ParquetLoader | Planned | 
@@ -120,7 +120,7 @@ python-etl-framework/
 
 ### 1. Abstract Base Classes (ABC) 
 All extractors, transformers, and loaders inherit from an abstract base class that enforces a consistent interface. 
-`BaseExtractor` declares `extract()` as an abstract method. Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Noting else changes downstream. 
+`BaseExtractor` declares `extract()` as an abstract method. Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Nothing else changes downstream. 
 
 ### 2. Template Method Pattern 
 `BaseExtractor.run()` is a concrete method that handles shared orchestration: logging pipeline start, calling `extract()`, logging completion, and handling exceptions. Subclasses implement only `extract()`. The orchestration logic is written once. 
@@ -143,7 +143,7 @@ PipelineError
 ```
 
 ### 4. Retry Decorator with Exponential Backoff 
-A decorator wraps `extract()` with configurable retry logic. Transient failures trigger a wait (backoff * attempt seconds) before retrying. Permanent failures are re-raised immediately. When all attempts are exhausted, `MaxRetriesExceededError` is raise, which carries the operation name, attempt count, total duration, and the last underlying exception. 
+A decorator wraps `extract()` with configurable retry logic. Transient failures trigger a wait (backoff * attempt seconds) before retrying. Permanent failures are re-raised immediately. When all attempts are exhausted, `MaxRetriesExceededError` is raised, which carries the operation name, attempt count, total duration, and the last underlying exception. 
 
 ### 5. Generator-Based Streaming 
 `extract()` returns a `Generator[Dict[str, Any], None, None]` rather than loading all records into memory. Records are yielded one at a time and consumed by the loader, keeping memory usage constant regardless of the dataset size. 
@@ -152,7 +152,7 @@ A decorator wraps `extract()` with configurable retry logic. Transient failures 
 All runtime configuration is validated at instantiation time using Pydantic `BaseModel`. Bad values (missing required fields, invalid types, constraint violations) raise `ValidationError` before any pipeline code runs (fail early, fail fast). Config objects are the single source of truth for extractor behavior. 
 
 ### 7. Structured Logging via `structlog` 
-All log output is emitted as key-value pairs rather than unstructured strings. Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_run_id` to its logger at initializaion. Every subsequent log line from that instance includes those fields automatically. Output is suitable for ingestion by observability tools. 
+All log output is emitted as key-value pairs rather than unstructured strings. Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_run_id` to its logger at initialization. Every subsequent log line from that instance includes those fields automatically. Output is suitable for ingestion by observability tools. 
 
 ---
 
@@ -210,14 +210,43 @@ python examples/api_to_parquet.py
 
 ### Configuration 
 
-> **In progress** - Full configuration reference will be added once `config/models.py` is complete. Config models are Pydantic `BaseModel` subclasses. All fields are validated at instantiation. The following config classes are planned: 
+Config models are Pydantic `BaseModel` subclasses defined in `etl_framework/config/models.py`. All fields are validated at instantiation. Missing required fields or invalid types raise `ValidationError` before any pipeline code runs. 
 
-| Config Class | Purpose | 
-|---|---| 
-| `RetryConfig` | `max_retries`, `backoff_factor` - shared by extractors and loaders | 
-| `ExtractorConfig` | Base config: `source_name`, `pipeline_run_id`, nested `RetryConfig` | 
-| `APIConfig` | Extends `ExtractorConfig`: `url`, `headers`, `timeout`, `page_size`, `auth_token` | 
-| `CSVConfig` | Extends `ExtractorConfig`: `file_path`, `delimiter`, `encoding` | 
+**Config class reference:** 
+
+| Config Class | Inherits From | Key Fields |  
+|---|---|---|
+| `RetryConfig` | `BaseModel` | `max_retries` (default: 3), `backoff_factor` (default: 2.0), `retry_on` (default: `[TransientExtractionError]`) | 
+| `ExtractorConfig` | `BaseModel` | `source_name` (required), `pipeline_run_id` (required), `retry_config` (default: `RetryConfig()`) |
+| `APIConfig` | `ExtractorConfig` | `url` (required), `auth_token` (required), `page_size` (default: 100), `timeout_seconds` (default: 30) | 
+| `CSVConfig` | `ExtractorConfig` | `file_path` (required), `delimiter` (default: `","`), `encoding` (default: `"utf-8"`) | 
+
+**Example: instantiating `APIConfig` with custom retry behavior:**
+
+```python 
+from etl_framework.config.models import APIConfig, RetryConfig
+
+config = APIConfig(
+    source_name="crm_contacts_api",
+    pipeline_run_id="run_20260630_001",
+    url="https://api.example.com/contacts",
+    auth_token="your_token_here",
+    page_size=100,
+    retry_config=RetryConfig(max_retries=5, backoff_factor=1.5)
+)
+```
+
+**Example: using defaults (no explicit `RetryConfig` required):** 
+
+```python 
+config = APIConfig(
+    source_name="crm_contacts_api",
+    pipeline_run_id="run_20260630_001",
+    url="https://api.example.com/contacts",
+    auth_token="your_token_here"
+)
+# retry_config defaults to RetryConfig(max_retries=3, backoff_factor=2.0)
+```
 
 ---
 
@@ -252,7 +281,7 @@ pytest tests/test_exceptions.py -v
 `extract()` yields records one at a time rather than loading all records into a list and returning it. This keeps memory usage flat regardless of dataset size. The trade-off is that generators are consumed once and cannot be rewound. Callers that need to inspect records multiple times must materialize into a list themselves. 
 
 ### Transient/permanent exception classification 
-Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it
+Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it (the hierarchy enforces this).
 
 ### `MaxRetriesExceededError` sits under `PipelineError`, not `ExtractionError` 
 The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. 
@@ -276,7 +305,7 @@ Extractor configuration (URL, auth token, page size) is passed at instantiation,
 | Decorators: retry with exponential backoff | `decorators/retry.py` | 
 | Generators: memory-efficient record streaming | `BaseExtractor.extract()` |
 | Type hints throughout | All modules | 
-| Pydantic: config validation, nested modules, field validators | `config/models.py` | 
+| Pydantic: config validation, nested models, field validators | `config/models.py` | 
 | Structured logging: context binding, key-value output | `logging/logger.py`, `BaseExtractor` | 
 | Unit testing: pytest, mocking, fixtures | `tests/` | 
 | Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` | 
