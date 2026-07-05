@@ -1,7 +1,7 @@
 # Python ETL Framework - Modular Ingestion Library
 
 > **Status: Active Development** - Core framework components are being built incrementally. 
-> REference the [implementation status](#implementation-status) table below.
+> Reference the [implementation status](#implementation-status) table below.
 
 ---
 
@@ -63,6 +63,20 @@ RetryConfig, APIConfig -> Config-driven Airflow task runs
 configure_logging() -> Structured observability across all layers 
 ```
 
+**End-to-end call flow (once complete):**
+
+```
+Airflow Task
+    └── configure_logging(level="INFO", environment="production")
+    └── extractor = RestApiExtractor(config)
+            └── BaseExtractor.__init__()     # binds logger, stores config
+    └── extractor.run()                      # template method
+            └── extract()                    # wrapped by @retry(config.retry_config)
+                    ├── TransientError  →  backoff → retry → MaxRetriesExceededError
+                    ├── PermanentError  →  re-raise immediately
+                    └── success         →  yield records → ParquetLoader
+```
+
 ---
 
 ## Project Structure 
@@ -84,26 +98,26 @@ python-etl-framework/
 │   │   └── parquet_loader.py       # ParquetLoader - in progress  
 │   ├── decorators/
 │   │   ├── __init__.py
-│   │   └── retry.py                # Exponential backoff retry decorator - in progress
+│   │   └── retry.py                # Retry decoratory factor - COMPLETE
 │   ├── config/
 │   │   ├── __init__.py
-│   │   └── models.py               # Pydantic config models - Complete
+│   │   └── models.py               # Pydantic config models - COMPLETE
 │   ├── exceptions/
 │   │   ├── __init__.py
-│   │   └── pipeline_errors.py      # Custom exception hierarchy - Complete
+│   │   └── pipeline_errors.py      # Custom exception hierarchy - COMPLETE
 │   └── logging/
 │       ├── __init__.py
-│       └── logger.py               # structlog setup - Complete  
+│       └── logger.py               # structlog setup - COMPLETE  
 │
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py                 # Shared fixtures
-│   └── test_exceptions.py          # Exception hierarchy tests - Complete
+│   └── test_exceptions.py          # Exception hierarchy tests - COMPLETE
 │
 ├── examples/
 │   └── api_to_parquet.py           # End-to-end usage example - in progress
 │
-├── pyproject.toml                  # Package config + dependencies - Complete
+├── pyproject.toml                  # Package config + dependencies - COMPLETE
 ├── .gitignore
 └── README.md
 ```
@@ -117,8 +131,8 @@ python-etl-framework/
 | `tests/test_exceptions.py` - exception hierarchy smoke tests | COMPLETE | 
 | `config/models.py` - Pydantic config models | COMPLETE | 
 | `logging/logger.py` - structlog setup | COMPLETE | 
-| `decorators/retry.py` - retry decorator | Planned | 
-| `base/extractor.py` - BaseExtractor (ABC) | Planned | 
+| `decorators/retry.py` - retry decorator | COMPLETE | 
+| `base/extractor.py` - BaseExtractor (ABC) | In Progress | 
 | `extractors/rest_api.py` - RestApiExtractor | Planned | 
 | `extractors/csv.py` - CSVExtractor | Planned | 
 | `loaders/parquet_loader.py` - ParquetLoader | Planned | 
@@ -153,7 +167,24 @@ PipelineError
 ```
 
 ### 4. Retry Decorator with Exponential Backoff 
-A decorator wraps `extract()` with configurable retry logic. Transient failures trigger a wait (backoff * attempt seconds) before retrying. Permanent failures are re-raised immediately. When all attempts are exhausted, `MaxRetriesExceededError` is raised, which carries the operation name, attempt count, total duration, and the last underlying exception. 
+A decorator factory wraps `extract()` with configurable retry logic driven by `RetryConfig`. 
+
+```
+retry(config)                    ← decorator factory: receives RetryConfig
+    └── retry_decorator(func)    ← decorator: receives the function to wrap
+            └── wrapper()        ← implements the retry loop
+
+Decision logic:
+    TransientExtractionError  →  wait (backoff_factor × attempt) → retry
+    PermanentExtractionError  →  re-raise immediately, no retry
+    Retries exhausted         →  raise MaxRetriesExceededError(
+                                     operation, attempts, duration_seconds, last_exception
+                                 ) chained from last exception via `from`
+    Unexpected exception      →  re-raise as-is, not swallowed
+```
+
+Backoff formula: `wait = backoff_factor x attempt_number` (linear scaling). 
+`MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, and the original exception) for observability and debugging. 
 
 ### 5. Generator-Based Streaming 
 `extract()` returns a `Generator[Dict[str, Any], None, None]` rather than loading all records into memory. Records are yielded one at a time and consumed by the loader, keeping memory usage constant regardless of the dataset size. 
@@ -309,8 +340,11 @@ pytest tests/test_exceptions.py -v
 ### Transient/permanent exception classification 
 Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it (the hierarchy enforces this).
 
+### Decorator factory pattern (`retry(config)`) over a plain decorator (`@retry`) 
+The retry decorator needs access to `RetryConfig` at decoration time. A plain `@retry` with no arguments cannot accept configuration. The factory pattern (`retry(config)` returns a decorator, which wraps the function) allows full configuration while keeping the decoratory syntax clean. The call chain is: `retry(config)` -> `retry_decorator(func)` -> `wrapper()`. 
+
 ### `MaxRetriesExceededError` sits under `PipelineError`, not `ExtractionError` 
-The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. 
+The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, last exception) chained via `raise ... from` to preserve the full causal chain in tracebacks. 
 
 ### Pydantic over dataclasses for config 
 `@dataclass` provides structure but no validation. Pydantic validates field types and constraints at instantiation. A misconfigured `APIConfig` raises `ValidationError` before any network call is made. The trade-off is a heavier dependency, which is acceptable here because Pydantic is already widely used. 
