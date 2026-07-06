@@ -144,12 +144,24 @@ python-etl-framework/
 
 ### 1. Abstract Base Classes (ABC) 
 All extractors, transformers, and loaders inherit from an abstract base class that enforces a consistent interface. 
-`BaseExtractor` declares `extract()` as an abstract method. Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Nothing else changes downstream. 
+`BaseExtractor` declares `extract()` as an abstract method via `abc.ABC` + `@abstractmethod`.  Adding a new source means subclassing `BaseExtractor` and implementing `.extract()`. Nothing else changes downstream. 
+
+Enforcement happens at **instantiation time**, not when the missing method is first called: attempting to instantiate `BaseExtractor` directly, or any subclass that omits `extract()`, raises `TypeError` immediately. This was verified with a smoke test confirming both `BaseExtractor(config)` and an incomplete subclass correctly fail fast.
 
 ### 2. Template Method Pattern 
-`BaseExtractor.run()` is a concrete method that handles shared orchestration: logging pipeline start, calling `extract()`, logging completion, and handling exceptions. Subclasses implement only `extract()`. The orchestration logic is written once. 
+`BaseExtractor.run()` is a concrete method that handles all shared orchestration: logging extraction start, applying retry logic, calling `extract()`, logging success or failure with duration, and returning the result. Subclasses implement only `extract()` and never override `run()`. The orchestration logic is written exactly once.
 
-### 3. Custom Exception Hierarchy 
+### 3. Functional Decorator Application (not `@` syntax)
+The retry decorator is applied to `extract()` **inside `run()`, at call time**, rather than with `@retry(...)` syntax above the method definition:
+
+```python
+protected_extract = retry(self.config.retry_config)(self.extract)
+result = protected_extract()
+```
+
+**Why:** `@` decorator syntax executes at class-definition time, before any instance - and therefore any per-instance `RetryConfig` - exists. Applying `retry()` as a plain function call inside `run()` uses `self.config.retry_config`, which is only available once an instance has been constructed. This keeps `extract()` implementations completely unaware that retry logic exists, and centralizes the retry policy in exactly one place (`run()`) rather than duplicating it across every concrete extractor.
+
+### 4. Custom Exception Hierarchy 
 Exceptions are classified as **transient** (retryable: network timeout, rate limit, 5xx) or **permanent** (non-retryable: 401, 404, malformed response). The retry decorator uses `isinstance()` checks against the hierarchy to check which branch of the hierarchy it belongs to. 
 
 ```
@@ -166,7 +178,7 @@ PipelineError
 └── MaxRetriesExceededError        → raised when retry attempts are exhausted
 ```
 
-### 4. Retry Decorator with Exponential Backoff 
+### 5. Retry Decorator with Exponential Backoff 
 A decorator factory wraps `extract()` with configurable retry logic driven by `RetryConfig`. 
 
 ```
@@ -186,13 +198,13 @@ Decision logic:
 Backoff formula: `wait = backoff_factor x attempt_number` (linear scaling). 
 `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, and the original exception) for observability and debugging. 
 
-### 5. Generator-Based Streaming 
+### 6. Generator-Based Streaming 
 `extract()` returns a `Generator[Dict[str, Any], None, None]` rather than loading all records into memory. Records are yielded one at a time and consumed by the loader, keeping memory usage constant regardless of the dataset size. 
 
-### 6. Pydantic Configuration 
+### 7. Pydantic Configuration 
 All runtime configuration is validated at instantiation time using Pydantic `BaseModel`. Bad values (missing required fields, invalid types, constraint violations) raise `ValidationError` before any pipeline code runs (fail early, fail fast). Config objects are the single source of truth for extractor behavior. 
 
-### 7. Structured Logging via `structlog` 
+### 8. Structured Logging via `structlog` 
 All log output is emitted as key-value pairs rather than unstructured strings. `configure_logging()` is called once at application startup and supports two output modes: 
 - **Development:** colorized, human-readable console output via `ConsoleRenderer`
 - **Production:** single-line JSON output per event via `JSONRenderer`, suitable for ingestion by Datadog, Splunk, CloudWatch, or equivalent 
@@ -322,55 +334,61 @@ pytest tests/test_exceptions.py -v
 
 **Current test coverage:**
 
-| Test File | What It Covers | Status | 
-|---|---|---| 
-| `tests/test_exceptions.py` | Exception hierarchy: inheritance, `isinstance()` checks, `MaxRetriesExceededError.__str__()` | COMPLETE | 
-| `tests/test_retry_decorator.py` | Retry logic: backoff, transient vs. permanent, exhaustion | Planned | 
-| `tests/test_api_extractor.py` | `RestApiExtractor`: extraction, pagination, exception translation | Planned | 
-| `tests/test_parquet_loader.py` | `ParquetLoader`: file output, schema validation | Planned | 
-| `tests/conftest.py` | Shared fixtures | Planned | 
+| Test File | What It Covers | Status |
+|---|---|---|
+| `tests/test_exceptions.py` | Exception hierarchy: inheritance, `isinstance()` checks, `MaxRetriesExceededError.__str__()` | COMPLETE |
+| `tests/test_retry_decorator.py` | Retry logic: backoff, transient vs. permanent, exhaustion | Planned |
+| `tests/test_base_extractor.py` | `BaseExtractor.run()`: success path, retry-then-success, permanent failure, ABC enforcement (`TypeError` on missing `extract()`) | Planned |
+| `tests/test_api_extractor.py` | `RestApiExtractor`: extraction, pagination, exception translation | Planned |
+| `tests/test_parquet_loader.py` | `ParquetLoader`: file output, schema validation | Planned |
+| `tests/conftest.py` | Shared fixtures (incl. `configure_logging()` fixture for test-session setup) | Planned |
 
 ---
 
 ## Key Design Decisions & Trade-offs 
 
-### Generator-based `extract()` over returning a list 
-`extract()` yields records one at a time rather than loading all records into a list and returning it. This keeps memory usage flat regardless of dataset size. The trade-off is that generators are consumed once and cannot be rewound. Callers that need to inspect records multiple times must materialize into a list themselves. 
+### `run()` uses `try/except/else`, not a bare `try/except`
+The initial implementation of `BaseExtractor.run()` used a plain `try/except` with no `else` clause - extraction succeeded correctly, but the result was never returned and the success log was never written, since there was no code path after the `try/except` for the success case. This was caught in review before commit. The fix moves all success-path logic (duration calculation, record-count logging, `return result`) into an `else` clause, which only executes when `try` completes with no exception. This also prevents a subtler bug: if success-path code itself raised an exception, placing it inside `try` would cause it to be misclassified as an extraction failure by the `except` block.
 
-### Transient/permanent exception classification 
+### Retry applied functionally inside `run()`, not via `@retry` on `extract()`
+The retry decorator needs a `RetryConfig` instance, which only exists once an `ExtractorConfig` has been constructed - after the class is already defined. `@` decorator syntax runs at class-definition time, before any instance-level config exists, so it cannot consume per-instance retry policy. `run()` instead calls `retry(self.config.retry_config)(self.extract)` as a plain function call at runtime, preserving both per-instance configurability and a clean separation between `extract()` (source logic) and retry orchestration (shared, base-class logic).
+
+### Transient/permanent exception classification
 Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it (the hierarchy enforces this).
 
-### Decorator factory pattern (`retry(config)`) over a plain decorator (`@retry`) 
-The retry decorator needs access to `RetryConfig` at decoration time. A plain `@retry` with no arguments cannot accept configuration. The factory pattern (`retry(config)` returns a decorator, which wraps the function) allows full configuration while keeping the decoratory syntax clean. The call chain is: `retry(config)` -> `retry_decorator(func)` -> `wrapper()`. 
+### Decorator factory pattern (`retry(config)`) over a plain decorator (`@retry`)
+The retry decorator needs access to `RetryConfig`, which varies per extractor instance. A plain `@retry` with no arguments cannot accept configuration, and (per the point above) cannot be applied via `@` syntax at all in this framework's design. The factory pattern (`retry(config)` returns a decorator, which wraps the function) allows full configuration while keeping the underlying decorator mechanics reusable. The call chain is: `retry(config)` → `retry_decorator(func)` → `wrapper()`.
 
-### `MaxRetriesExceededError` sits under `PipelineError`, not `ExtractionError` 
-The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, last exception) chained via `raise ... from` to preserve the full causal chain in tracebacks. 
+### `MaxRetriesExceededError` sits under `PipelineError`, not `ExtractionError`
+The retry decorator is not specific to extractors. When loaders gain retry logic, the same `MaxRetriesExceededError` applies. Placing it under `ExtractionError` would incorrectly scope it and require a parallel class for loaders. `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, last exception) chained via `raise ... from` to preserve the full causal chain in tracebacks.
 
-### Pydantic over dataclasses for config 
-`@dataclass` provides structure but no validation. Pydantic validates field types and constraints at instantiation. A misconfigured `APIConfig` raises `ValidationError` before any network call is made. The trade-off is a heavier dependency, which is acceptable here because Pydantic is already widely used. 
+### Pydantic over dataclasses for config
+`@dataclass` provides structure but no validation. Pydantic validates field types and constraints at instantiation. A misconfigured `APIConfig` raises `ValidationError` before any network call is made. The trade-off is a heavier dependency, which is acceptable here because Pydantic is already widely used.
 
 ### Config passed into `__init__`, not `extract()`
-Extractor configuration (URL, auth token, page size) is passed at instantiation, not at call time. This makes the extractor self-contained and allows `run()` to be called with no arguments. This is the intended and planned interface for Airflow task wrappers. 
+Extractor configuration (URL, auth token, page size) is passed at instantiation, not at call time. This makes the extractor self-contained and allows `run()` to be called with no arguments. This is the intended and planned interface for Airflow task wrappers.
 
 ### `configure_logging()` is called by the application, not by the framework
-`BaseExtractor` does not call `configure_logging()` internally. Calling it inside `BaseExtractor.__init__()` would reconfigure the global logging state every time an extractor is instantiated.
+`BaseExtractor` does not call `configure_logging()` internally. Calling it inside `BaseExtractor.__init__()` would reconfigure the global logging state every time an extractor is instantiated. A library should not make global configuration decisions on behalf of the application using it.
 
 --- 
 
 ## Skills Demonstrated 
 
-| Skill | Where | 
+| Skill | Where |
 |---|---|
 | Python OOP: ABC, inheritance, Template Method pattern | `base/extractor.py`, all extractors |
-| Custom exception hierarchy with `isinstance()` classification | `exceptions/pipeline_errors.py` | 
-| Decorators: retry with exponential backoff | `decorators/retry.py` | 
-| Generators: memory-efficient record streaming | `BaseExtractor.extract()` |
-| Type hints throughout | All modules | 
-| Pydantic: config validation, nested models, field validators | `config/models.py` | 
-| Structured logging: context binding, key-value output | `logging/logger.py`, `BaseExtractor` | 
-| Unit testing: pytest, mocking, fixtures | `tests/` | 
-| Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` | 
-| `raise ... from e` exception chaining | All extractors | 
+| ABC enforcement (`TypeError` on missing abstract method) | `base/extractor.py` |
+| `try/except/else` for correct success/failure separation | `base/extractor.py` |
+| Custom exception hierarchy with `isinstance()` classification | `exceptions/pipeline_errors.py` |
+| Decorators: decorator factories, functional (non-`@`) application | `decorators/retry.py`, `base/extractor.py` |
+| Defensive handling of unknown/variable return types | `base/extractor.py` (`len()` guarded by `TypeError`) |
+| Type hints throughout | All modules |
+| Pydantic: config validation, nested models, `default_factory` | `config/models.py` |
+| Structured logging: context binding, key-value output | `logging/logger.py`, `base/extractor.py` |
+| Unit testing: pytest, mocking, fixtures | `tests/` |
+| Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` |
+| `raise ... from e` exception chaining | `decorators/retry.py` |
 
 <br> 
 
