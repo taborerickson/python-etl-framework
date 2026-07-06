@@ -88,10 +88,10 @@ python-etl-framework/
 │   ├── __init__.py
 │   ├── base/
 │   │   ├── __init__.py
-│   │   └── extractor.py            # BaseExtractor ABC - in progress 
+│   │   └── extractor.py            # BaseExtractor ABC - COMPLETE 
 │   ├── extractors/
 │   │   ├── __init__.py
-│   │   ├── rest_api.py             # RestApiExtractor - in progress 
+│   │   ├── rest_api.py             # RestApiExtractor - COMPLETE 
 │   │   └── csv.py                  # CSVExtractor - in progress
 │   ├── loaders/
 │   │   ├── __init__.py
@@ -132,8 +132,8 @@ python-etl-framework/
 | `config/models.py` - Pydantic config models | COMPLETE | 
 | `logging/logger.py` - structlog setup | COMPLETE | 
 | `decorators/retry.py` - retry decorator | COMPLETE | 
-| `base/extractor.py` - BaseExtractor (ABC) | In Progress | 
-| `extractors/rest_api.py` - RestApiExtractor | Planned | 
+| `base/extractor.py` - BaseExtractor (ABC) | COMPLETE | 
+| `extractors/rest_api.py` - RestApiExtractor | COMPLETE | 
 | `extractors/csv.py` - CSVExtractor | Planned | 
 | `loaders/parquet_loader.py` - ParquetLoader | Planned | 
 | `examples/api_to_parquet.py` - end-to-end example | Planned | 
@@ -150,6 +150,8 @@ Enforcement happens at **instantiation time**, not when the missing method is fi
 
 ### 2. Template Method Pattern 
 `BaseExtractor.run()` is a concrete method that handles all shared orchestration: logging extraction start, applying retry logic, calling `extract()`, logging success or failure with duration, and returning the result. Subclasses implement only `extract()` and never override `run()`. The orchestration logic is written exactly once.
+
+`RestApiExtractor` is the framework's first concrete implementation of this pattern. It implements only `extract()`, and the full retry/logging orchestration built works against it without modification. 
 
 ### 3. Functional Decorator Application (not `@` syntax)
 The retry decorator is applied to `extract()` **inside `run()`, at call time**, rather than with `@retry(...)` syntax above the method definition:
@@ -178,6 +180,8 @@ PipelineError
 └── MaxRetriesExceededError        → raised when retry attempts are exhausted
 ```
 
+`RestApiExtractor` is the first component to actually raise these exceptions from a real failure condition (an HTTP call), rather than a synthetic test case. 
+
 ### 5. Retry Decorator with Exponential Backoff 
 A decorator factory wraps `extract()` with configurable retry logic driven by `RetryConfig`. 
 
@@ -198,13 +202,30 @@ Decision logic:
 Backoff formula: `wait = backoff_factor x attempt_number` (linear scaling). 
 `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, and the original exception) for observability and debugging. 
 
-### 6. Generator-Based Streaming 
-`extract()` returns a `Generator[Dict[str, Any], None, None]` rather than loading all records into memory. Records are yielded one at a time and consumed by the loader, keeping memory usage constant regardless of the dataset size. 
+### 6. `list[dict]` Return Contract (Streaming Deferred) 
+`extract()` returns `list[dict]` rather than a `pandas.DataFrame` or a `Generator`. This keeps the extraction layer transformation-agnostic. A `list[dict]` can be handed to pandas, PyArrow, or written directly as JSON without introducing a hard dependency on any single downstream library into the extraction contract itself. 
 
-### 7. Pydantic Configuration 
+A generator was considered and deferred. With single-page extraction (pagination is not yet implemented), the response is a bounded, known-size payload with no memory pressure. Once extraction spans multiple pages, yielding records per page becomes the better decision. (**Will be revisited with pagination implementation**)
+
+### 7. HTTP Status-to-Exception Mapping
+`RestApiExtractor.extract()` translates HTTP-layer outcomes into the exception hierarchy above:
+
+| HTTP Condition | Exception Raised | Classification |
+|---|---|---|
+| Connection failure / timeout | `NetworkError` | Transient |
+| `5xx` | `ServerError` | Transient |
+| `429` | `RateLimitError` | Transient |
+| `401` / `403` | `AuthenticationError` | Permanent |
+| `404` | `SourceNotFoundError` | Permanent |
+| Unparseable response body | `MalformedResponseError` | Permanent |
+| `200` with an error indicator in the body | `MalformedResponseError` | Permanent |
+
+The last row is an edge case: an HTTP `200` only confirms transport-level success, not application-level success. Some APIs return `200` with an error payload in the body, so `extract()` checks the parsed body for an error indicator before returning data, even on a successful status code.
+
+### 8. Pydantic Configuration 
 All runtime configuration is validated at instantiation time using Pydantic `BaseModel`. Bad values (missing required fields, invalid types, constraint violations) raise `ValidationError` before any pipeline code runs (fail early, fail fast). Config objects are the single source of truth for extractor behavior. 
 
-### 8. Structured Logging via `structlog` 
+### 9. Structured Logging via `structlog` 
 All log output is emitted as key-value pairs rather than unstructured strings. `configure_logging()` is called once at application startup and supports two output modes: 
 - **Development:** colorized, human-readable console output via `ConsoleRenderer`
 - **Production:** single-line JSON output per event via `JSONRenderer`, suitable for ingestion by Datadog, Splunk, CloudWatch, or equivalent 
@@ -262,11 +283,13 @@ config = APIConfig(
     url="https://api.example.com/contacts",
     auth_token="your_token_here",
     page_size=100,
+    timeout_seconds=30, 
     retry_config=RetryConfig(max_retries=3, backoff_factor=2.0)
 )
 
 extractor = RestApiExtractor(config)
 extractor.run()  # handles retry, logging, and error classification automatically
+# records is a list[dict] regardless of the source API's raw response shape 
 ```
 
 **Run the end-to-end example** *(once complete)*:
@@ -289,6 +312,8 @@ Config models are Pydantic `BaseModel` subclasses defined in `etl_framework/conf
 | `ExtractorConfig` | `BaseModel` | `source_name` (required), `pipeline_run_id` (required), `retry_config` (default: `RetryConfig()`) |
 | `APIConfig` | `ExtractorConfig` | `url` (required), `auth_token` (required), `page_size` (default: 100), `timeout_seconds` (default: 30) | 
 | `CSVConfig` | `ExtractorConfig` | `file_path` (required), `delimiter` (default: `","`), `encoding` (default: `"utf-8"`) | 
+
+> **Note:** `timeout_seconds` is typed as `int` by design - sub-second precision is not needed for production timeout values. When testing timeout behavior, force the failure via mocking (`side_effect=requests.exceptions.Timeout(...)`) rather than passing a fractional-second value.
 
 **Example: `APIConfig` with custom retry behavior:**
 
@@ -371,6 +396,18 @@ Extractor configuration (URL, auth token, page size) is passed at instantiation,
 ### `configure_logging()` is called by the application, not by the framework
 `BaseExtractor` does not call `configure_logging()` internally. Calling it inside `BaseExtractor.__init__()` would reconfigure the global logging state every time an extractor is instantiated. A library should not make global configuration decisions on behalf of the application using it.
 
+### No intermediate `HttpExtractor` ABC between `BaseExtractor` and `RestApiExtractor`
+An intermediate ABC for HTTP-specific concerns (session setup, default headers, auth injection) was considered, since a future `GraphQLExtractor` or `WebhookExtractor` could theoretically share that logic. With exactly one concrete HTTP-based extractor currently in the framework, this was deferred. Adding this now would add a layer of indirection with no current code-reuse benefit. If a second HTTP-based extractor is added and real duplication emerges, extracting a shared `HttpExtractor` at that point is a low-cost, mechanical refactor informed by two real implementations rather than a guess.
+
+### `requests.Session()` created once in `__init__`, not per-call in `extract()`
+`RestApiExtractor` creates a single `requests.Session()` at instantiation and reuses it across all calls to `extract()`. A `Session` reuses the underlying TCP connection instead of renegotiating it on every request, and allows auth headers to be set once rather than passed into every individual HTTP call. Creating a new session inside `extract()` would silently defeat this benefit.
+
+### 200-with-error-body treated as `MalformedResponseError`
+Some APIs return HTTP `200` with an error condition described inside the JSON body rather than via the status code. `extract()` checks the parsed response body for an error indicator before returning data, even on a `200` status, and raises `MalformedResponseError` if found. This is classified as permanent (not retried) since the request itself was well-formed and successfully transported - retrying an identical request would produce an identical application-level error.
+
+### `Retry-After` header not yet consumed on `429` responses
+The retry decorator currently uses a fixed exponential backoff formula and does not read the `Retry-After` header some APIs return alongside a `429`. Consuming it would require `RateLimitError` to carry the wait duration as data and the retry decorator to prefer that value over its own backoff calculation. Documenting here as a known limitation rather than a silent gap; revisit if a real integrated API is observed relying on this header.
+
 --- 
 
 ## Skills Demonstrated 
@@ -383,12 +420,15 @@ Extractor configuration (URL, auth token, page size) is passed at instantiation,
 | Custom exception hierarchy with `isinstance()` classification | `exceptions/pipeline_errors.py` |
 | Decorators: decorator factories, functional (non-`@`) application | `decorators/retry.py`, `base/extractor.py` |
 | Defensive handling of unknown/variable return types | `base/extractor.py` (`len()` guarded by `TypeError`) |
+| REST API integration: HTTP methods, status codes, headers, sessions | `extractors/rest_api.py` |
+| HTTP failure classification (network, 4xx, 5xx) mapped to a custom exception hierarchy | `extractors/rest_api.py` |
+| Defensive API integration: handling 200-with-error-body and unknown response shapes | `extractors/rest_api.py` |
 | Type hints throughout | All modules |
 | Pydantic: config validation, nested models, `default_factory` | `config/models.py` |
 | Structured logging: context binding, key-value output | `logging/logger.py`, `base/extractor.py` |
-| Unit testing: pytest, mocking, fixtures | `tests/` |
+| Unit testing: pytest, mocking (`unittest.mock.patch`), fixtures | `tests/` |
 | Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` |
-| `raise ... from e` exception chaining | `decorators/retry.py` |
+| `raise ... from e` exception chaining | `decorators/retry.py`, `extractors/rest_api.py` |
 
 <br> 
 
