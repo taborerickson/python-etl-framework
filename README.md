@@ -70,12 +70,17 @@ Airflow Task
     └── configure_logging(level="INFO", environment="production")
     └── extractor = RestApiExtractor(config)
             └── BaseExtractor.__init__()     # binds logger, stores config
-    └── extractor.run()                      # template method
-            └── extract()                    # wrapped by @retry(config.retry_config)
-                    ├── TransientError  →  backoff → retry → MaxRetriesExceededError
-                    ├── PermanentError  →  re-raise immediately
-                    └── success         →  yield records → ParquetLoader
+    └── for record in extractor.run()        # template method, Generator 
+            └── extract()                    # generator; yields per record
+                    └── _fetch_page()         # wrapped by retry(config.retry_config)
+                            ├── TransientError  →  backoff → retry → MaxRetriesExceededError
+                            ├── PermanentError  →  re-raise immediately
+                            └── success         →  returns a batch
+                    └── yield from batch        →  records stream to caller one at a time
+            └── ParquetLoader (per-record or per-batch write, no full materialization)
 ```
+
+Retry is resolved fully *before* any record from a page is yielded. A mid-retry failure can never surface as a duplicate or partial record downstream. 
 
 ---
 
@@ -149,19 +154,25 @@ All extractors, transformers, and loaders inherit from an abstract base class th
 Enforcement happens at **instantiation time**, not when the missing method is first called: attempting to instantiate `BaseExtractor` directly, or any subclass that omits `extract()`, raises `TypeError` immediately. This was verified with a smoke test confirming both `BaseExtractor(config)` and an incomplete subclass correctly fail fast.
 
 ### 2. Template Method Pattern 
-`BaseExtractor.run()` is a concrete method that handles all shared orchestration: logging extraction start, applying retry logic, calling `extract()`, logging success or failure with duration, and returning the result. Subclasses implement only `extract()` and never override `run()`. The orchestration logic is written exactly once.
+`BaseExtractor.run()` is a concrete method that handles all shared orchestration: logging extraction start, iterating `extract()` and yielding each record through, tracking a running record count, and logging success (with final count) or failure (with the count yielded before the error) with duration, timing, and streaming. The orchestration logic is written exactly once. 
 
-`RestApiExtractor` is the framework's first concrete implementation of this pattern. It implements only `extract()`, and the full retry/logging orchestration built works against it without modification. 
+Retry orchestration is intentionally **not** part of `run()`. It is each subclass's responsibility, applied internally around whatever unit of work that source's `extract()` depends on. This keeps `run()` a pure streaming/logging layer with no assumptions about how, or whether, a given source needs to retry. 
+
+`RestApiExtractor` is the framework's first concrete implementation of this pattern. It implements `extract()` as a generator (delegating its retryable work to a private `_fetch_page()` helper), and the full loggin/streaming orchestration in `run()` works against it without modification. 
 
 ### 3. Functional Decorator Application (not `@` syntax)
-The retry decorator is applied to `extract()` **inside `run()`, at call time**, rather than with `@retry(...)` syntax above the method definition:
+The retry decorator is applied **inside each concrete extractor's `extract()`, at call time**, wrapping a private, eager helper method rather than the generator itself, and rather than using `@retry(...)` syntax above a method definition: 
 
 ```python
-protected_extract = retry(self.config.retry_config)(self.extract)
-result = protected_extract()
+# RestApiExtractor.extract() 
+protected_fetch = retry(self.config.retry_config)(self._fetch_page) 
+page = protected_fetch() 
+yield from page 
 ```
 
-**Why:** `@` decorator syntax executes at class-definition time, before any instance - and therefore any per-instance `RetryConfig` - exists. Applying `retry()` as a plain function call inside `run()` uses `self.config.retry_config`, which is only available once an instance has been constructed. This keeps `extract()` implementations completely unaware that retry logic exists, and centralizes the retry policy in exactly one place (`run()`) rather than duplicating it across every concrete extractor.
+**Why functional application, not `@` syntax:** `@` decorator syntax executes at class-definition time, before any instance - and therefore any per-instance `RetryConfig` - exists. Applying `retry()` as a plain function call inside `run()` uses `self.config.retry_config`, which is only available once an instance has been constructed. 
+
+**Why the retry wraps `_fetch_page()` and not `extract()` itself:** a generator function's body does not execute when called — only when iterated. If `retry()` wrapped `extract` directly, the wrapped call would just construct a generator object and return successfully every time, since none of `extract()`'s code (including the HTTP call) has run yet - the `try/except` inside the retry decorator would be protecting nothing. Splitting the retryable work into `_fetch_page()` - an eager method that either fully succeeds or fully fails, with no partial state - means the retry decorator wraps something that actually executes at the moment it's called, exactly as it's designed to. `extract()` itself stays a thin generator that calls the retry-wrapped fetch and then streams its result with `yield from`.
 
 ### 4. Custom Exception Hierarchy 
 Exceptions are classified as **transient** (retryable: network timeout, rate limit, 5xx) or **permanent** (non-retryable: 401, 404, malformed response). The retry decorator uses `isinstance()` checks against the hierarchy to check which branch of the hierarchy it belongs to. 
@@ -183,7 +194,7 @@ PipelineError
 `RestApiExtractor` is the first component to actually raise these exceptions from a real failure condition (an HTTP call), rather than a synthetic test case. 
 
 ### 5. Retry Decorator with Exponential Backoff 
-A decorator factory wraps `extract()` with configurable retry logic driven by `RetryConfig`. 
+A decorator factory wraps a source's fetch unit (e.g. `RestApiExtractor._fetch_page()`) with configurable retry logic driven by `RetryConfig`. 
 
 ```
 retry(config)                    ← decorator factory: receives RetryConfig
@@ -191,7 +202,7 @@ retry(config)                    ← decorator factory: receives RetryConfig
             └── wrapper()        ← implements the retry loop
 
 Decision logic:
-    TransientExtractionError  →  wait (backoff_factor × attempt) → retry
+    TransientExtractionError  →  wait (backoff_factor ** attempt) → retry
     PermanentExtractionError  →  re-raise immediately, no retry
     Retries exhausted         →  raise MaxRetriesExceededError(
                                      operation, attempts, duration_seconds, last_exception
@@ -199,13 +210,14 @@ Decision logic:
     Unexpected exception      →  re-raise as-is, not swallowed
 ```
 
-Backoff formula: `wait = backoff_factor x attempt_number` (linear scaling). 
+Backoff formula: `wait = backoff_factor ** attempt_number` (exponential scaling). 
 `MaxRetriesExceededError` carries structured metadata (operation name, attempt count, total elapsed duration, and the original exception) for observability and debugging. 
+
+### 6. `Generator-Based Streaming Contract 
+`extract()` yields records one at a time via a Python generator, rather than returning a `list[dict]`. This was a deliberate reversal of an earlier design decision. The original rationale ("single-page extraction has a bounded, known-size payload, so a list is fine for now") locked every future extractor (CSV, database cursor, paginated API) into either violating the contract or requiring a rewrite later. A reusable ingestion framework intended for data engineering workflows should default to the memory-safe contract, and let a caller materialize a list at the call site if they sprcifically want on (`list(extractor.run())`), not the other way around. 
 
 ### 6. `list[dict]` Return Contract (Streaming Deferred) 
 `extract()` returns `list[dict]` rather than a `pandas.DataFrame` or a `Generator`. This keeps the extraction layer transformation-agnostic. A `list[dict]` can be handed to pandas, PyArrow, or written directly as JSON without introducing a hard dependency on any single downstream library into the extraction contract itself. 
-
-A generator was considered and deferred. With single-page extraction (pagination is not yet implemented), the response is a bounded, known-size payload with no memory pressure. Once extraction spans multiple pages, yielding records per page becomes the better decision. (**Will be revisited with pagination implementation**)
 
 ### 7. HTTP Status-to-Exception Mapping
 `RestApiExtractor.extract()` translates HTTP-layer outcomes into the exception hierarchy above:
@@ -257,7 +269,7 @@ pip show etl-framework
 
 ### Usage 
 
-> **In progress** - Usage examples will be added once `RestApiExtractor` and `ParquetLoader` are complete. The example below shows the intended and planned interface. 
+> **In progress** - `RestApiExtractor` is complete and usable. `ParquetLoader` is not yet implemented, so the extraction-only example below is fully runnable; the full extract → load example will be added once `ParquetLoader` lands.
 
 **Configure logging at application startup:**
 
@@ -288,8 +300,15 @@ config = APIConfig(
 )
 
 extractor = RestApiExtractor(config)
-extractor.run()  # handles retry, logging, and error classification automatically
-# records is a list[dict] regardless of the source API's raw response shape 
+
+# extractor.run() is a generator - handles retry, logging, and error
+# classification automatically, and yields records one at a time
+for record in extractor.run():
+    ...  # hand each record to a transformer/loader as it arrives
+
+# Or, if you specifically want a materialized list (e.g. for a quick
+# script or a small, known-bounded source), the caller can opt in:
+records = list(extractor.run())
 ```
 
 **Run the end-to-end example** *(once complete)*:
@@ -373,10 +392,16 @@ pytest tests/test_exceptions.py -v
 ## Key Design Decisions & Trade-offs 
 
 ### `run()` uses `try/except/else`, not a bare `try/except`
-The initial implementation of `BaseExtractor.run()` used a plain `try/except` with no `else` clause - extraction succeeded correctly, but the result was never returned and the success log was never written, since there was no code path after the `try/except` for the success case. This was caught in review before commit. The fix moves all success-path logic (duration calculation, record-count logging, `return result`) into an `else` clause, which only executes when `try` completes with no exception. This also prevents a subtler bug: if success-path code itself raised an exception, placing it inside `try` would cause it to be misclassified as an extraction failure by the `except` block.
+The initial implementation of `BaseExtractor.run()` used a plain `try/except` with no `else` clause - extraction succeeded correctly, but the success log was never written, since there was no code path after the `try/except` for the success case. This was caught in review before commit. The fix moves all success-path logic (duration calculation, record-count logging, `return result`) into an `else` clause, which only executes when `try` completes with no exception. This also prevents a subtler bug: if success-path code itself raised an exception, placing it inside `try` would cause it to be misclassified as an extraction failure by the `except` block.
 
-### Retry applied functionally inside `run()`, not via `@retry` on `extract()`
-The retry decorator needs a `RetryConfig` instance, which only exists once an `ExtractorConfig` has been constructed - after the class is already defined. `@` decorator syntax runs at class-definition time, before any instance-level config exists, so it cannot consume per-instance retry policy. `run()` instead calls `retry(self.config.retry_config)(self.extract)` as a plain function call at runtime, preserving both per-instance configurability and a clean separation between `extract()` (source logic) and retry orchestration (shared, base-class logic).
+This shape carried forward unchanged when `run()` became a generator. The `try` now wraps a `for record in self.extract(): yield record` loop instead of a single call, but the success/failure separation logic is identical: `else` still only runs once the loop is fully exhausted with no exception, and `except` still logs and re-raises on any failure mid-iteration. 
+
+### Retry applied functionally inside `extract()`, wrapping `_fetch_page()` - not via `@retry` on `extract()`, and not inside `run()`
+The retry decorator needs a `RetryConfig` instance, which only exists once an `ExtractorConfig` has been constructed - after the class is already defined. `@` decorator syntax runs at class-definition time, before any instance-level config exists, so it cannot consume per-instance retry policy. This part of the original design still holds. 
+
+What changed: retry orchestration was originally applied inside `BaseExtractor.run()`, wrapping `self.extract` directly (`retry(self.config.retry_config)(self.extract)`). Once `extract()` became a generator (see "Generator-Based Streaming Contract" above), this broke silently - calling a generator function doesn't run its body, so the retry wrapper's `try/except` never observed the HTTP call that happens later, during iteration. 
+
+The fix moves retry down into each concrete extractor, wrapping only the specific atomic, eager unit of work that extractor depends on - for `RestApiExtractor`, that's `_fetch_page()`, not `extract()` itself. `run()` no longer knows or cares about retry at all; it's a pure streaming/logging layer. This is arguably a cleaner separation of concerns than the original design: retry policy now lives directly next to the operation it protects, and a future extractor with a different atomic unit of work (e.g. a paginated fetch, or a single database cursor batch) applies retry to *its* atomic unit without `BaseExtractor` needing to know anything about it.
 
 ### Transient/permanent exception classification
 Rather than retrying all exceptions or none, the framework distinguishes retryable from non-retryable failures at the class hierarchy level. This avoids wasting retries on errors that will never succeed (401, malformed JSON) while still recovering from transient conditions (network timeout, rate limit). The trade-off is that a developer adding a new exception must intentionally classify it (the hierarchy enforces this).
