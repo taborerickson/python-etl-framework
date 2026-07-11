@@ -21,19 +21,30 @@ Maps HTTP-layer failures to the framework's exception hierarchy:
 Scop limitations (by design): 
     - Single-page extraction only. Pagination to be implemented in a 
       future revision and is not handled in this implementation. 
-    - Retry logic is not implemented here. This module raises the 
-      appropriate exception on failure and returns cleanly on success; 
-      retry/backoff behavior is orchestrated by BaseExtractor.run() 
-      via the retry() decorator (etl_framework/decorators/retry.py). 
 
-Returns extracted records as list[dict] regardless of the source API's 
-raw response shape (bare list, {'results': [...]}, or {'data': [...]}), 
-so downstream loaders never need to know the source API's response format. 
+Retry design: 
+    extract() is a generator that yields records one at a time. The actual 
+    network call happens inside _fetch_page(), a private eager helper that 
+    either fully succeeds (returns a complete batch) or fully fails (raises). 
+    It is this method (not extract() itself) that is wrapped with the retry() 
+    decorator (etl_framework/decorators/retry.py). This split is necessary 
+    because a generator function's body does not execute until it is iterated: 
+    wrapping extract() directly with retry() would only ever protect the (instant,
+    always-successful) construction of the generator object, not the HTTP call 
+    that happens later once iteration begins. Retrying _fetch_page() instead 
+    guarantees any retry is fully resolved before a single record is yielded 
+    downstream, so a mid-retry failure can never result in duplicate or partial 
+    records reaching a caller. 
+
+Yields records one at a time regardless of the source API's raw response 
+shape (bare list, {'results': [...]}, or {'data': [...]}), so downstream 
+loaders never need to know the source API's response format. 
 """
 
 import requests 
 from etl_framework.base.extractor import BaseExtractor 
 from etl_framework.config.models import APIConfig 
+from etl_framework.decorators.retry import retry 
 from etl_framework.exceptions.pipeline_errors import (
     NetworkError, 
     ServerError, 
@@ -60,10 +71,16 @@ class RestApiExtractor(BaseExtractor):
         })
   
 
-    def extract(self) -> list[dict]: 
+    def _fetch_page(self) -> list[dict]: 
         """
-        Performs a single-page GET request against self.config.url
-        and returns the parsed response as a list of records. 
+        Performs a single, retryable GET request against self.config.url 
+        and returns the parsed response as a bounded list of records. 
+
+        This method is the retry-protected unit: it either fully succeeds (returns 
+        a complete, valid batch) or fully fails (raises), with no partial state 
+        escaping. A retry here can never produce duplicate or partial records 
+        downstream, because nothing has been yielded to a caller yet when a retry 
+        is triggered. 
 
         Raises: 
             NetworkError: on connection failure or timeout (transient)
@@ -71,7 +88,7 @@ class RestApiExtractor(BaseExtractor):
             RateLimitError: on 429 responses (transient) 
             AuthenticationError: on 401/403 responses (permanent) 
             SourceNotFoundError: on 404 responses (permanent) 
-            MalformedResponseError: on unparseable response body (permanent) 
+            MalformedResponseError: on unparseable response body (permanent)
         """
         try: 
             response = self.session.get(
@@ -111,7 +128,7 @@ class RestApiExtractor(BaseExtractor):
             raise MalformedResponseError(
                 f"Unexpected status {status} from {self.config.url}"
             )
-        
+
         try: 
             payload = response.json() 
         except ValueError as e: 
@@ -132,6 +149,26 @@ class RestApiExtractor(BaseExtractor):
             return payload['data'] 
         
         raise MalformedResponseError(f"Unexpected payload shape from {self.config.url}")
-        
+
+
+    def extract(self):
+        """
+        Generator. Yields records one at a time from the source. 
+
+        Wraps self._fetch_page() with the configured retry policy (retried if it raises 
+        TransientExceptionError). Once a page is successfully fetched, its records are 
+        yielded individually to the caller. 
+
+        Pagination is not yet implemented: this yields exactly one page's worth of records. 
+        When pagination lands, this method will instead loop through calling self._fetch_page()
+        once per page (retried individually per page) and yielding from each page before 
+        requesting the next. This makes the generator's memory benefit apply to the full result
+        set, not just one page. 
+        """
+        protected_fetch = retry(self.config.retry_config)(self._fetch_page) 
+        page = protected_fetch() 
+        yield from page 
+
+
 
 
