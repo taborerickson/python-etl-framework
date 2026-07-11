@@ -13,7 +13,7 @@ Behavior:
 - Retries exhausted: raises MaxRetriesExceededError with structured metadata, 
   chained from the last exception. 
 
-Backoff formula: wait = backoff_factor * attempt_number (linear scaling). 
+Backoff formula: wait = backoff_factor ** attempt_number (exponential scaling). 
 
 Usage: 
     config = RetryConfig(max_retries=3, backoff_factor=2.0) 
@@ -67,7 +67,8 @@ def retry(config: RetryConfig):
                                 last_exception=last_exception, 
                             ) from last_exception 
                         
-                        wait = config.backoff_factor * attempt 
+                        max_wait_seconds = 60 # adding max wait time to avoid unbounded growth 
+                        wait = min(config.backoff_factor ** attempt, max_wait_seconds)  
                         time.sleep(wait) 
                          
                     else: 
