@@ -14,8 +14,25 @@ Hierarchy:
         CSVConfig -- extends ExtractorConfig for CSV file sources 
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field 
+from datetime import datetime, timezone 
+from uuid import uuid4 
 from etl_framework.exceptions.pipeline_errors import TransientExtractionError
+
+# auto-generated pipeline_run_id 
+def _generate_pipeline_run_id() -> str: 
+    """
+    Generates a sortable, effectively-collision-free pipeline_run_id in 
+    the form YYYYMMDDTHHMMSS-<6 hex chars>, e.g. "20260712T151530-a3f9c1".
+
+    The timestamp prefix means run IDs sort chronologically and read 
+    naturally in log output at a glance (closer to what Airflow's run_id looks 
+    like). The short uuid4 suffix guards against two runs starting in the same 
+    second (e.g. parallel or backfill runs) still ending up with distinct IDs. 
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    suffix = uuid4().hex[:6] 
+    return f"{timestamp}-{suffix}"
 
 # RetryConfig 
 class RetryConfig(BaseModel): 
@@ -34,7 +51,7 @@ class RetryConfig(BaseModel):
 class ExtractorConfig(BaseModel): 
     """Base identity config for all extractor configs"""
     source_name: str
-    pipeline_run_id: str
+    pipeline_run_id: str = Field(default_factory=_generate_pipeline_run_id) 
     retry_config: RetryConfig = Field(default_factory=RetryConfig)
 
 # APIConfig 
