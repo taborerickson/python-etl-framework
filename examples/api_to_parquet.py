@@ -43,6 +43,12 @@ def main():
         # auto-generates one (timestamp + short suffix) via default_factory. 
         url="https://jsonplaceholder.typicode.com/posts", 
         auth_token="not-required-for-this-api", 
+        # JSONPlaceholder ignores page/per_pagee and always returns all 100 posts 
+        # in one response. page_size must exceed that count so extract()'s 
+        # "short page" stopping condition (len(page) < page_size) actually 
+        # triggers on the first request (otherwise it loops forever re-fetching 
+        # the same 100 records). 200 is a safe margin above the known count. 
+        page_size=200, 
         timeout_seconds=10, 
     )
 
