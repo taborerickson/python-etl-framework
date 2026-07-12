@@ -68,6 +68,16 @@ class SourceNotFoundError(PermanentExtractionError):
     def __init__(self, message: str) -> None: 
         super().__init__(message) 
 
+# MalformedFileError 
+class MalformedFileError(PermanentExtractionError): 
+    """
+    Raised when a source file cannot be parsed: bad encoding, malformed CSV 
+    structure, or otherwise unreadable content. The file-based sibling of 
+    MalformedResponseError.
+    """
+    def __init__(self, message: str) -> None: 
+        super().__init__(message) 
+
 #===================================================
 
 # Max Retry Exceeded Error 
