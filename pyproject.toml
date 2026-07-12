@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.0",
     "structlog>=24.0",
     "requests>=2.31",
+    "pyarrow>=15.0",
 ]
 
 [project.optional-dependencies] 

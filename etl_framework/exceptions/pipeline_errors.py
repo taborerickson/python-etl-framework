@@ -108,5 +108,18 @@ class MaxRetriesExceededError(PipelineError):
 
 #===================================================
 
-# LoadError and TransformError hierarchies -- deferred. 
-# to be added when loaders/transformers are implemented. 
+# ------ Load Exceptions -------
+
+# LoadError
+class LoadError(PipelineError): 
+    """Base class for all load failures. Catch this to handle any load error."""
+
+# TransientLoadError
+class TransientLoadError(LoadError): 
+    """Base class for retryable load failures. Mirrors TransientExtractionError on the load side."""
+
+
+# PermanentLoadError 
+class PermanentLoadError(LoadError): 
+    """Base class for non-retryable load failures. Mirrors PermanentExtractionError on the load side."""
+
