@@ -39,11 +39,15 @@ def main():
 
     config = APIConfig(
         source_name="jsonplaceholder_posts", 
-        pipeline_run_id="example-run-001", 
+        # pipeline_run_id intentionally omitted -- ExtractorConfig now 
+        # auto-generates one (timestamp + short suffix) via default_factory. 
         url="https://jsonplaceholder.typicode.com/posts", 
         auth_token="not-required-for-this-api", 
         timeout_seconds=10, 
     )
+
+    # print auto-generated pipeline_run_id for visibility (example pipeline run only)
+    print(f"Running pipeline_run_id={config.pipeline_run_id}")
 
     extractor = RestApiExtractor(config) 
     transformer = PassThroughTransformer() 
