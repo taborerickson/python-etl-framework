@@ -47,3 +47,7 @@ coverage.xml
 .venv/*
 .test_env/*
 .test_env/ 
+
+# output/ 
+output/*
+output/.gitkeep
