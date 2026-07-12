@@ -30,9 +30,15 @@ class TransientExtractionError(ExtractionError):
 
 # RateLimitError 
 class RateLimitError(TransientExtractionError):
-    """Raised when the source API returns HTTP 429 (rate limit exceeded).""" 
-    def __init__(self, message: str) -> None: 
+    """
+    Raised when the source API returns HTTP 429 (rate limit exceeded).
+    If the response included a Retry-After header, its value (in seconds) is
+    captured on `retry_after` so the retry decorator can honor the server's 
+    requested wait instead of calculating its own backoff. 
+    """ 
+    def __init__(self, message: str, retry_after: float | None = None) -> None: 
         super().__init__(message) 
+        self.retry_after = retry_after
 
 # NetworkError 
 class NetworkError(TransientExtractionError): 

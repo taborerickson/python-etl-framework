@@ -67,8 +67,12 @@ def retry(config: RetryConfig):
                                 last_exception=last_exception, 
                             ) from last_exception 
                         
-                        max_wait_seconds = 60 # adding max wait time to avoid unbounded growth 
-                        wait = min(config.backoff_factor ** attempt, max_wait_seconds)  
+                        retry_after = getattr(e, "retry_after", None) 
+                        if retry_after is not None: 
+                            wait = retry_after 
+                        else: 
+                            max_wait_seconds = 60 # adding max wait time to avoid unbounded growth 
+                            wait = min(config.backoff_factor ** attempt, max_wait_seconds)  
                         time.sleep(wait) 
                          
                     else: 
