@@ -71,7 +71,7 @@ class RestApiExtractor(BaseExtractor):
         })
   
 
-    def _fetch_page(self) -> list[dict]: 
+    def _fetch_page(self, page: int) -> list[dict]: 
         """
         Performs a single, retryable GET request against self.config.url 
         and returns the parsed response as a bounded list of records. 
@@ -93,6 +93,7 @@ class RestApiExtractor(BaseExtractor):
         try: 
             response = self.session.get(
                 self.config.url, 
+                params={"page": page, "per_page": self.config.page_size}, 
                 timeout=self.config.timeout_seconds, 
             )
         except requests.exceptions.Timeout as e: 
@@ -108,8 +109,11 @@ class RestApiExtractor(BaseExtractor):
         status = response.status_code 
 
         if status == 429: 
+            retry_after_header = response.headers.get("Retry-After") 
+            retry_after = float(retry_after_header) if retry_after_header else None 
             raise RateLimitError(
-                f"Rate limited by {self.config.url} (429)" 
+                f"Rate limited by {self.config.url} (429)",
+                retry_after=retry_after,  
             )
         if 500 <= status < 600: 
             raise ServerError(
@@ -159,16 +163,24 @@ class RestApiExtractor(BaseExtractor):
         TransientExceptionError). Once a page is successfully fetched, its records are 
         yielded individually to the caller. 
 
-        Pagination is not yet implemented: this yields exactly one page's worth of records. 
-        When pagination lands, this method will instead loop through calling self._fetch_page()
-        once per page (retried individually per page) and yielding from each page before 
-        requesting the next. This makes the generator's memory benefit apply to the full result
-        set, not just one page. 
+        Stopping condition: the source is presumed exhausted once a page 
+        comes back empty, or with fewer records than config.page_size (a 
+        short page is the conventional "this was the last page" signal for 
+        offset/page-number-style pagination).
         """
         protected_fetch = retry(self.config.retry_config)(self._fetch_page) 
-        page = protected_fetch() 
-        yield from page 
 
+        page_number = 1 
+        while True: 
+            page_records = protected_fetch(page_number) 
 
+            if not page_records: 
+                break 
 
+            yield from page_records 
+
+            if len(page_records) < self.config.page_size: 
+                break 
+
+            page_number += 1 
 
