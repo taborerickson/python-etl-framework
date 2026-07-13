@@ -1,8 +1,5 @@
 # Python ETL Framework - Modular Ingestion Library
 
-> **Status: Active Development** - Core framework components are being built incrementally. 
-> Reference the [implementation status](#implementation-status) table below.
-
 ---
 
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
@@ -16,12 +13,13 @@ This framework serves as the ingestion layer for the [Sales-Intelligence-Pipelin
 - [Problem Statement](#problem-statement)
 - [Architecture](#architecture) 
 - [Project Structure](#project-structure) 
-- [Implementation Status](#implementation-status) 
 - [Key Design Patterns](#key-design-patterns) 
+- [Streaming & Memory Model](#streaming--memory-model)
+- [Public API](#public-api) 
 - [Installation](#installation)  
 - [Usage](#usage)  
 - [Configuration](#configuration)  
-- [Running Tests](#running-tests) 
+- [Testing Strategy](#testing-strategy) 
 - [Key Design Decisions & Trade-offs](#key-design-decisions--trade-offs) 
 - [Skills Demonstrated](#skills-demonstrated) 
 
@@ -50,8 +48,6 @@ Every new data source requires starting from scratch. There is no shared contrac
 
 ## Architecture 
 
-> **In progress** - Architecture diagram will be added once the core extractor and loader components are complete. Will cover: ingestion layer, config flow, retry decorator, structured logging, and the relationship to the Sales Intelligence Pipeline Bronze layer. 
-
 **How this framework relates to the spine project:**
 
 ```
@@ -71,13 +67,15 @@ Airflow Task
     └── extractor = RestApiExtractor(config)
             └── BaseExtractor.__init__()     # binds logger, stores config
     └── for record in extractor.run()        # template method, Generator 
-            └── extract()                    # generator; yields per record
+            └── extract()                    # generator; yields per page/record
                     └── _fetch_page()         # wrapped by retry(config.retry_config)
                             ├── TransientError  →  backoff → retry → MaxRetriesExceededError
                             ├── PermanentError  →  re-raise immediately
                             └── success         →  returns a batch
                     └── yield from batch        →  records stream to caller one at a time
-            └── ParquetLoader (per-record or per-batch write, no full materialization)
+                    └── (loops to next page until a short/empty page signals exhaustion)
+    └── transformer.transform(records)        # generator in, generator out
+    └── loader.run(transformed_records)       # ParquetLoader: batched writes, no full materialization
 ```
 
 Retry is resolved fully *before* any record from a page is yielded. A mid-retry failure can never surface as a duplicate or partial record downstream. 
@@ -90,58 +88,55 @@ Retry is resolved fully *before* any record from a page is yielded. A mid-retry 
 python-etl-framework/
 │
 ├── etl_framework/                  # Main installable package 
-│   ├── __init__.py
+│   ├── __init__.py                 # Public API - re-exports every concrete class 
 │   ├── base/
 │   │   ├── __init__.py
-│   │   └── extractor.py            # BaseExtractor ABC - COMPLETE 
+│   │   ├── extractor.py            # BaseExtractor ABC 
+│   │   └── loader.py               # BaseLoader ABC  
 │   ├── extractors/
 │   │   ├── __init__.py
-│   │   ├── rest_api.py             # RestApiExtractor - COMPLETE 
-│   │   └── csv.py                  # CSVExtractor - in progress
+│   │   ├── rest_api.py             # RestApiExtractor (pagination, Retry-After) 
+│   │   └── csv.py                  # CSVExtractor 
 │   ├── loaders/
 │   │   ├── __init__.py
-│   │   └── parquet_loader.py       # ParquetLoader - in progress  
+│   │   └── parquet_loader.py       # ParquetLoader 
+│   ├── transformers/
+│   │   ├── __init__.py
+│   │   ├── base.py                 # BaseTransformer ABC 
+│   │   └── passthrough.py          # PassThroughTransformer 
 │   ├── decorators/
 │   │   ├── __init__.py
-│   │   └── retry.py                # Retry decoratory factor - COMPLETE
+│   │   └── retry.py                # Retry decoratory factor
 │   ├── config/
 │   │   ├── __init__.py
-│   │   └── models.py               # Pydantic config models - COMPLETE
+│   │   └── models.py               # Pydantic config models 
 │   ├── exceptions/
 │   │   ├── __init__.py
-│   │   └── pipeline_errors.py      # Custom exception hierarchy - COMPLETE
+│   │   └── pipeline_errors.py      # Custom exception hierarchy
 │   └── logging/
 │       ├── __init__.py
-│       └── logger.py               # structlog setup - COMPLETE  
+│       └── logger.py               # structlog setup  
 │
-├── tests/
+├── tests/                          # 10 files, 91 tests, 99% coverage 
 │   ├── __init__.py
-│   ├── conftest.py                 # Shared fixtures
-│   └── test_exceptions.py          # Exception hierarchy tests - COMPLETE
+│   ├── conftest.py                 # Shared factory fixtures + payload-shape fixtures
+│   ├── test_exceptions.py          # 22 tests
+│   ├── test_config_models.py       # 11 tests 
+│   ├── test_retry.py               # 8 tests 
+│   ├── test_rest_api_extractor.py  # 22 tests 
+│   ├── test_csv_extractor.py       # 8 tests 
+│   ├── test_base_extractor.py      # 5 tests 
+│   ├── test_parquet_loader.py      # 5 tests 
+│   ├── test_transformers.py        # 4 tests 
+│   └── test_logging_config.py      # 6 tests 
 │
 ├── examples/
-│   └── api_to_parquet.py           # End-to-end usage example - in progress
+│   └── api_to_parquet.py           # End-to-end usage example - runnable
 │
-├── pyproject.toml                  # Package config + dependencies - COMPLETE
+├── pyproject.toml                  # Package config + dependencies 
 ├── .gitignore
 └── README.md
 ```
-
-**Implementation status:**
-
-| Component | Status | 
-|---|---|
-| `pyproject.toml` - package config, dependencies, tooling | COMPLETE | 
-| `exceptions/pipeline_errors.py` - custom exception hierarchy | COMPLETE | 
-| `tests/test_exceptions.py` - exception hierarchy smoke tests | COMPLETE | 
-| `config/models.py` - Pydantic config models | COMPLETE | 
-| `logging/logger.py` - structlog setup | COMPLETE | 
-| `decorators/retry.py` - retry decorator | COMPLETE | 
-| `base/extractor.py` - BaseExtractor (ABC) | COMPLETE | 
-| `extractors/rest_api.py` - RestApiExtractor | COMPLETE | 
-| `extractors/csv.py` - CSVExtractor | Planned | 
-| `loaders/parquet_loader.py` - ParquetLoader | Planned | 
-| `examples/api_to_parquet.py` - end-to-end example | Planned | 
 
 ---
 
@@ -216,9 +211,6 @@ Backoff formula: `wait = backoff_factor ** attempt_number` (exponential scaling)
 ### 6. `Generator-Based Streaming Contract 
 `extract()` yields records one at a time via a Python generator, rather than returning a `list[dict]`. This was a deliberate reversal of an earlier design decision. The original rationale ("single-page extraction has a bounded, known-size payload, so a list is fine for now") locked every future extractor (CSV, database cursor, paginated API) into either violating the contract or requiring a rewrite later. A reusable ingestion framework intended for data engineering workflows should default to the memory-safe contract, and let a caller materialize a list at the call site if they sprcifically want on (`list(extractor.run())`), not the other way around. 
 
-### 6. `list[dict]` Return Contract (Streaming Deferred) 
-`extract()` returns `list[dict]` rather than a `pandas.DataFrame` or a `Generator`. This keeps the extraction layer transformation-agnostic. A `list[dict]` can be handed to pandas, PyArrow, or written directly as JSON without introducing a hard dependency on any single downstream library into the extraction contract itself. 
-
 ### 7. HTTP Status-to-Exception Mapping
 `RestApiExtractor.extract()` translates HTTP-layer outcomes into the exception hierarchy above:
 
@@ -246,6 +238,101 @@ Each extractor instance binds `extractor_class`, `source_name`, and `pipeline_ru
 
 ---
 
+## Streaming & Memory Model 
+
+A reusable ingestion framework can't assume its source data fits in memory. `extract()`
+is a generator: it yields records one at a time rather than returning a materialized
+`list[dict]`. This means the same code path handles a 5-row CSV and a 5-million-row API
+export at constant memory. Nothing downstream ever needs more than the current record
+in memory at once. A caller who *wants* a materialized list can still opt in explicitly
+(`list(extractor.run())`); the framework doesn't force that cost on every caller by default.
+
+### The generator/retry split
+
+Converting `extract()` to a generator broke naive retry wrapping: calling a generator
+function doesn't execute its body. It only constructs a generator object, instantly and
+successfully, every time. The real work (the HTTP call, the file read) happens later,
+during iteration, outside whatever `try/except` a decorator applied to the call itself.
+
+The fix splits each extractor into two parts:
+- **An eager, atomic unit of work** (`RestApiExtractor._fetch_page()`) that either fully
+  succeeds (returns a complete batch) or fully fails (raises) the moment it's called.
+  This is what `retry()` wraps.
+- **A thin generator** (`extract()`) that calls the retry-protected unit and then
+  `yield from`s its result.
+
+```python
+def _fetch_page(self, page: int) -> list[dict]:
+    """Eager. Either fully succeeds (returns a batch) or fully fails (raises).
+    This is the method retry() wraps."""
+    response = self.session.get(...)
+    ...
+    return payload
+
+def extract(self):
+    """Generator. Thin. Delegates the retryable work, then streams the result."""
+    protected_fetch = retry(self.config.retry_config)(self._fetch_page)
+    page_number = 1
+    while True:
+        page_records = protected_fetch(page_number)   # retry fully resolves HERE
+        if not page_records:
+            break
+        yield from page_records                        # THEN streaming begins
+        if len(page_records) < self.config.page_size:
+            break
+        page_number += 1
+```
+
+This guarantees retry is fully resolved *before* any record from a page reaches the
+caller. A mid-retry failure can never surface as a duplicate or partial record
+downstream. Callers never need to reason about retry at all; it's fully contained
+inside the extractor.
+
+### The same discipline, applied deliberately everywhere else
+
+- **`CSVExtractor`** carries **no retry logic**, on purpose. A missing file or malformed
+  row is a permanent failure. Retrying doesn't fix corrupt bytes or a wrong path.
+  `tests/test_csv_extractor.py` includes an explicit regression test locking this decision in, so a future "helpful" addition of retry logic here fails a test rather than silently landing.
+- **`BaseTransformer`/`PassThroughTransformer`** are generator-in, generator-out. The
+  same non-materialization contract as the extractor layer, with no retry concern since
+  pure transformation has nothing external to fail transiently.
+- **`ParquetLoader`** can't be a generator (a loader is the terminal end of the
+  pipeline), but preserves the same memory discipline via batching: it writes fixed-size
+  batches (default 500 records) to disk via `pyarrow.parquet.ParquetWriter` as they
+  arrive, rather than materializing the full input first. `tests/test_parquet_loader.py`
+  proves this with a custom iterator that raises if `len()` is ever called on it. The
+  test only passes because the loader genuinely never materializes its input.
+
+---
+
+## Public API 
+
+Everything below is importable directly from the top-level `etl_framework` package:
+
+```python
+from etl_framework import (
+    BaseExtractor, BaseLoader,             # ABCs
+    RestApiExtractor, CSVExtractor,        # Concrete extractors
+    ParquetLoader,                         # Concrete loader
+    BaseTransformer, PassThroughTransformer,  # Transformer layer
+    RetryConfig, ExtractorConfig, APIConfig, CSVConfig,  # Config models
+    retry,                                 # Retry decorator factory
+    configure_logging, get_logger,         # Structured logging
+)
+```
+
+**The exception hierarchy requires a submodule import.** Unlike the classes above, exception classes are not re-exported from the top-level package:
+
+```python
+from etl_framework.exceptions import (
+    PipelineError, RateLimitError, MalformedFileError, MaxRetriesExceededError, ...
+)
+```
+
+This is intentional, not an oversight. Most callers construct extractors, loaders, and configs via the top-level import, and only need specific exception classes when writing `except` clauses for particular failure types. This is a less frequent, more targeted need that doesn't justify inflating the top-level namespace with every leaf exception class.
+
+---
+
 ## Installation 
 
 **Prerequisites**: 
@@ -269,7 +356,7 @@ pip show etl-framework
 
 ### Usage 
 
-> **In progress** - `RestApiExtractor` is complete and usable. `ParquetLoader` is not yet implemented, so the extraction-only example below is fully runnable; the full extract → load example will be added once `ParquetLoader` lands.
+The example below wires `RestApiExtractor`, `PassThroughTransformer`, and `ParquetLoader` together into a runnable extract-transform-load pipeline. The full script is available at `examples/api_to_parquet.py`.
 
 **Configure logging at application startup:**
 
@@ -311,7 +398,7 @@ for record in extractor.run():
 records = list(extractor.run())
 ```
 
-**Run the end-to-end example** *(once complete)*:
+**Run the end-to-end example:**
 
 ```powershell
 python examples/api_to_parquet.py 
@@ -328,7 +415,7 @@ Config models are Pydantic `BaseModel` subclasses defined in `etl_framework/conf
 | Config Class | Inherits From | Key Fields |  
 |---|---|---|
 | `RetryConfig` | `BaseModel` | `max_retries` (default: 3), `backoff_factor` (default: 2.0), `retry_on` (default: `[TransientExtractionError]`) | 
-| `ExtractorConfig` | `BaseModel` | `source_name` (required), `pipeline_run_id` (required), `retry_config` (default: `RetryConfig()`) |
+| `ExtractorConfig` | `BaseModel` | `source_name` (required), `pipeline_run_id` (auto-generated via `default_factory` - timestamp + short uuid4 suffix; override optional), `retry_config` (default: `RetryConfig()`) |
 | `APIConfig` | `ExtractorConfig` | `url` (required), `auth_token` (required), `page_size` (default: 100), `timeout_seconds` (default: 30) | 
 | `CSVConfig` | `ExtractorConfig` | `file_path` (required), `delimiter` (default: `","`), `encoding` (default: `"utf-8"`) | 
 
@@ -363,6 +450,27 @@ config = APIConfig(
 
 ---
 
+## Testing Strategy
+
+**Running the suite:**
+
+```powershell
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=etl_framework --cov-report=term-missing
+
+# Run a specific test file
+pytest tests/test_retry.py -v
+```
+
+**Result: 91 tests, all passing, 99% statement coverage (306/308 lines).** The two uncovered lines are the `raise NotImplementedError` bodies of `BaseLoader.load()` and `BaseTransformer.transform()`. These are unreachable by design, since Python's `abstractmethod` machinery prevents instantiating a subclass that doesn't override them.
+
+Every HTTP interaction is mocked via `responses` (zero real network calls in the suite). Every retry/backoff scenario, including a 60-second backoff cap and a 17-second `Retry-After` wait, is mocked via `unittest.mock.patch` on `time.sleep`, so the full suite runs in well under half a second despite testing behavior that would otherwise take tens of real seconds.
+
+---
+
 ### Running Tests 
 
 ```powershell
@@ -376,16 +484,20 @@ pytest --cov=etl_framework --cov-report=term-missing
 pytest tests/test_exceptions.py -v 
 ```
 
-**Current test coverage:**
+**Test files:**
 
-| Test File | What It Covers | Status |
+| Test File | Tests | What It Verifies |
 |---|---|---|
-| `tests/test_exceptions.py` | Exception hierarchy: inheritance, `isinstance()` checks, `MaxRetriesExceededError.__str__()` | COMPLETE |
-| `tests/test_retry_decorator.py` | Retry logic: backoff, transient vs. permanent, exhaustion | Planned |
-| `tests/test_base_extractor.py` | `BaseExtractor.run()`: success path, retry-then-success, permanent failure, ABC enforcement (`TypeError` on missing `extract()`) | Planned |
-| `tests/test_api_extractor.py` | `RestApiExtractor`: extraction, pagination, exception translation | Planned |
-| `tests/test_parquet_loader.py` | `ParquetLoader`: file output, schema validation | Planned |
-| `tests/conftest.py` | Shared fixtures (incl. `configure_logging()` fixture for test-session setup) | Planned |
+| `test_exceptions.py` | 22 | Exception hierarchy, message pass-through, `MaxRetriesExceededError` formatting, `__cause__` chaining |
+| `test_config_models.py` | 11 | Fail-fast validation, defaults, `retry_on` mutable-default regression guard, `pipeline_run_id` auto-generation |
+| `test_retry.py` | 8 | Retry limits, transient/permanent branching, full exponential backoff sequence, 60s cap, `Retry-After` precedence |
+| `test_rest_api_extractor.py` | 22 | HTTP status mapping, all payload shapes, retry recovery, pagination, `Retry-After` timing |
+| `test_csv_extractor.py` | 8 | CSV parsing/errors, explicit "no retry" regression guard |
+| `test_base_extractor.py` | 5 | Structured logging correctness, partial-iteration edge cases |
+| `test_parquet_loader.py` | 5 | Batching (spy on `_write_batch`), non-materialization, error modes |
+| `test_transformers.py` | 4 | Generator behavior and explicit laziness proof |
+| `test_logging_config.py` | 6 | `configure_logging()` across level/environment combinations |
+| `conftest.py` | N/A | Shared fixtures used across the suite |
 
 ---
 
@@ -430,8 +542,8 @@ An intermediate ABC for HTTP-specific concerns (session setup, default headers, 
 ### 200-with-error-body treated as `MalformedResponseError`
 Some APIs return HTTP `200` with an error condition described inside the JSON body rather than via the status code. `extract()` checks the parsed response body for an error indicator before returning data, even on a `200` status, and raises `MalformedResponseError` if found. This is classified as permanent (not retried) since the request itself was well-formed and successfully transported - retrying an identical request would produce an identical application-level error.
 
-### `Retry-After` header not yet consumed on `429` responses
-The retry decorator currently uses a fixed exponential backoff formula and does not read the `Retry-After` header some APIs return alongside a `429`. Consuming it would require `RateLimitError` to carry the wait duration as data and the retry decorator to prefer that value over its own backoff calculation. Documenting here as a known limitation rather than a silent gap; revisit if a real integrated API is observed relying on this header.
+### `Retry-After` takes presedence over calculated backoff when present 
+`RateLimitError` carries an optional `retry_after` field, populated from the `Retry-After` HTTP header when a 429 response includes one. The retry decorator checks for this attribute (`getattr(e, "retry_after", None)`) before falling back to its own exponential formula. If the server tells you exactly how long to wait, trust that over a guess. APIs that don't return the header (or exceptions with no `retry_after` at all) fall back to the standard `backoff_factor ** attempt` calculation, capped at 60 seconds. Both paths are covered by `test_retry.py` and `test_rest_api_extractor.py`.
 
 --- 
 
