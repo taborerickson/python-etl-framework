@@ -1,7 +1,5 @@
 # Python ETL Framework - Modular Ingestion Library
 
----
-
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
 Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and full unit test coverage. 
 
@@ -59,7 +57,7 @@ RetryConfig, APIConfig -> Config-driven Airflow task runs
 configure_logging() -> Structured observability across all layers 
 ```
 
-**End-to-end call flow (once complete):**
+**End-to-end call flow:**
 
 ```
 Airflow Task
@@ -106,7 +104,7 @@ python-etl-framework/
 │   │   └── passthrough.py          # PassThroughTransformer 
 │   ├── decorators/
 │   │   ├── __init__.py
-│   │   └── retry.py                # Retry decoratory factor
+│   │   └── retry.py                # Retry decorator factor
 │   ├── config/
 │   │   ├── __init__.py
 │   │   └── models.py               # Pydantic config models 
@@ -167,7 +165,7 @@ yield from page
 
 **Why functional application, not `@` syntax:** `@` decorator syntax executes at class-definition time, before any instance - and therefore any per-instance `RetryConfig` - exists. Applying `retry()` as a plain function call inside `run()` uses `self.config.retry_config`, which is only available once an instance has been constructed. 
 
-**Why the retry wraps `_fetch_page()` and not `extract()` itself:** a generator function's body does not execute when called — only when iterated. If `retry()` wrapped `extract` directly, the wrapped call would just construct a generator object and return successfully every time, since none of `extract()`'s code (including the HTTP call) has run yet - the `try/except` inside the retry decorator would be protecting nothing. Splitting the retryable work into `_fetch_page()` - an eager method that either fully succeeds or fully fails, with no partial state - means the retry decorator wraps something that actually executes at the moment it's called, exactly as it's designed to. `extract()` itself stays a thin generator that calls the retry-wrapped fetch and then streams its result with `yield from`.
+**Why the retry wraps `_fetch_page()` and not `extract()` itself:** a generator function's body does not execute when called, only when iterated. If `retry()` wrapped `extract` directly, the wrapped call would just construct a generator object and return successfully every time, since none of `extract()`'s code (including the HTTP call) has run yet - the `try/except` inside the retry decorator would be protecting nothing. Splitting the retryable work into `_fetch_page()` - an eager method that either fully succeeds or fully fails, with no partial state - means the retry decorator wraps something that actually executes at the moment it's called, exactly as it's designed to. `extract()` itself stays a thin generator that calls the retry-wrapped fetch and then streams its result with `yield from`.
 
 ### 4. Custom Exception Hierarchy 
 Exceptions are classified as **transient** (retryable: network timeout, rate limit, 5xx) or **permanent** (non-retryable: 401, 404, malformed response). The retry decorator uses `isinstance()` checks against the hierarchy to check which branch of the hierarchy it belongs to. 
@@ -363,10 +361,10 @@ The example below wires `RestApiExtractor`, `PassThroughTransformer`, and `Parqu
 ```python 
 from etl_framework.logging.logger import configure_logging
 
-# Development — colorized, human-readable output
+# Development - colorized, human-readable output
 configure_logging(level="INFO", environment="development")
 
-# Production — single-line JSON output
+# Production - single-line JSON output
 configure_logging(level="INFO", environment="production")
 ```
 
@@ -469,21 +467,6 @@ pytest tests/test_retry.py -v
 
 Every HTTP interaction is mocked via `responses` (zero real network calls in the suite). Every retry/backoff scenario, including a 60-second backoff cap and a 17-second `Retry-After` wait, is mocked via `unittest.mock.patch` on `time.sleep`, so the full suite runs in well under half a second despite testing behavior that would otherwise take tens of real seconds.
 
----
-
-### Running Tests 
-
-```powershell
-# Run all tests 
-pytest 
-
-# Run with coverage report 
-pytest --cov=etl_framework --cov-report=term-missing 
-
-# Run a specific test file 
-pytest tests/test_exceptions.py -v 
-```
-
 **Test files:**
 
 | Test File | Tests | What It Verifies |
@@ -542,7 +525,7 @@ An intermediate ABC for HTTP-specific concerns (session setup, default headers, 
 ### 200-with-error-body treated as `MalformedResponseError`
 Some APIs return HTTP `200` with an error condition described inside the JSON body rather than via the status code. `extract()` checks the parsed response body for an error indicator before returning data, even on a `200` status, and raises `MalformedResponseError` if found. This is classified as permanent (not retried) since the request itself was well-formed and successfully transported - retrying an identical request would produce an identical application-level error.
 
-### `Retry-After` takes presedence over calculated backoff when present 
+### `Retry-After` takes precedence over calculated backoff when present 
 `RateLimitError` carries an optional `retry_after` field, populated from the `Retry-After` HTTP header when a 429 response includes one. The retry decorator checks for this attribute (`getattr(e, "retry_after", None)`) before falling back to its own exponential formula. If the server tells you exactly how long to wait, trust that over a guess. APIs that don't return the header (or exceptions with no `retry_after` at all) fall back to the standard `backoff_factor ** attempt` calculation, capped at 60 seconds. Both paths are covered by `test_retry.py` and `test_rest_api_extractor.py`.
 
 --- 
