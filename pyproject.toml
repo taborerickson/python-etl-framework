@@ -28,9 +28,24 @@ include = ["etl_framework*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"] 
+addopts = "-ra --strict-markers"
 
 [tool.ruff] 
 line-length = 88
 
 [tool.ruff.lint] 
 select = ["E", "F", "I"] 
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["etl_framework"] 
+branch = true 
+
+[tool.coverage.report] 
+show_missing = true 
+exclude_lines = [
+    "pragma: no cover", 
+    "if TYPE_CHECKING:", 
+    "raise NotImplementedError", 
+    "if __name__ == .__main__.:",
+]
