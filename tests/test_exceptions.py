@@ -13,24 +13,24 @@ Covers:
   debuggability (you can walk last_exception.__cause__ in a log/debugger)
 """
 
-import pytest 
+import pytest
 
 from etl_framework.exceptions.pipeline_errors import (
-    PipelineError,
-    ExtractionError,
-    TransientExtractionError,
-    PermanentExtractionError,
-    RateLimitError,
-    NetworkError,
-    ServerError,
     AuthenticationError,
-    MalformedResponseError,
-    SourceNotFoundError,
-    MalformedFileError,
-    MaxRetriesExceededError,
+    ExtractionError,
     LoadError,
-    TransientLoadError,
+    MalformedFileError,
+    MalformedResponseError,
+    MaxRetriesExceededError,
+    NetworkError,
+    PermanentExtractionError,
     PermanentLoadError,
+    PipelineError,
+    RateLimitError,
+    ServerError,
+    SourceNotFoundError,
+    TransientExtractionError,
+    TransientLoadError,
 )
 
 #-------------------------------------------------------------------------

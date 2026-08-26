@@ -41,18 +41,20 @@ shape (bare list, {'results': [...]}, or {'data': [...]}), so downstream
 loaders never need to know the source API's response format. 
 """
 
-import requests 
-from etl_framework.base.extractor import BaseExtractor 
-from etl_framework.config.models import APIConfig 
-from etl_framework.decorators.retry import retry 
+import requests
+
+from etl_framework.base.extractor import BaseExtractor
+from etl_framework.config.models import APIConfig
+from etl_framework.decorators.retry import retry
 from etl_framework.exceptions.pipeline_errors import (
-    NetworkError, 
-    ServerError, 
-    RateLimitError, 
-    AuthenticationError, 
-    SourceNotFoundError, 
-    MalformedResponseError, 
+    AuthenticationError,
+    MalformedResponseError,
+    NetworkError,
+    RateLimitError,
+    ServerError,
+    SourceNotFoundError,
 )
+
 
 # RestApiExtractor 
 class RestApiExtractor(BaseExtractor): 

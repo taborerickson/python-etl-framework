@@ -3,10 +3,10 @@
 """Public Pydantic config models for extractors and retry behavior."""
 
 from etl_framework.config.models import (
-    RetryConfig, 
-    ExtractorConfig, 
-    APIConfig, 
+    APIConfig,
     CSVConfig,
+    ExtractorConfig,
+    RetryConfig,
 )
 
 __all__ = ["RetryConfig", "ExtractorConfig", "APIConfig", "CSVConfig"]

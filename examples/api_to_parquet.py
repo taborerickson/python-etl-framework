@@ -12,15 +12,16 @@ file. Run with:
     python examples/api_to_parquet.py 
 """
 
-import os 
+import os
 
 from etl_framework import (
-    configure_logging, 
-    APIConfig, 
-    RestApiExtractor, 
-    PassThroughTransformer, 
-    ParquetLoader, 
+    APIConfig,
+    ParquetLoader,
+    PassThroughTransformer,
+    RestApiExtractor,
+    configure_logging,
 )
+
 
 def main(): 
     """

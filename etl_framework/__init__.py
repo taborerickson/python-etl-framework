@@ -12,21 +12,21 @@ without reaching into submodules:
     from etl_framework import RestApiExtractor, CSVExtractor, ParquetLoader
 """
 
-from etl_framework.base.extractor import BaseExtractor 
-from etl_framework.base.loader import BaseLoader 
-from etl_framework.extractors.rest_api import RestApiExtractor 
-from etl_framework.extractors.csv import CSVExtractor 
-from etl_framework.loaders.parquet_loader import ParquetLoader 
-from etl_framework.transformers.base import BaseTransformer 
-from etl_framework.transformers.passthrough import PassThroughTransformer 
+from etl_framework.base.extractor import BaseExtractor
+from etl_framework.base.loader import BaseLoader
 from etl_framework.config.models import (
-    RetryConfig, 
-    ExtractorConfig, 
-    APIConfig, 
-    CSVConfig, 
+    APIConfig,
+    CSVConfig,
+    ExtractorConfig,
+    RetryConfig,
 )
-from etl_framework.decorators.retry import retry 
+from etl_framework.decorators.retry import retry
+from etl_framework.extractors.csv import CSVExtractor
+from etl_framework.extractors.rest_api import RestApiExtractor
+from etl_framework.loaders.parquet_loader import ParquetLoader
 from etl_framework.logging.logger import configure_logging, get_logger
+from etl_framework.transformers.base import BaseTransformer
+from etl_framework.transformers.passthrough import PassThroughTransformer
 
 __all__ = [
     "BaseExtractor", "BaseLoader", "RestApiExtractor", 

@@ -15,11 +15,12 @@ exposing a generator via extract(). This keeps run() a pure streaming/logging
 layer with no dependency on how a given source retries. 
 """
 
-from abc import ABC, abstractmethod 
-import time 
+import time
+from abc import ABC, abstractmethod
 
 from etl_framework.config.models import ExtractorConfig
-from etl_framework.logging.logger import get_logger 
+from etl_framework.logging.logger import get_logger
+
 
 # BaseExtractor (ABC) 
 class BaseExtractor(ABC): 

@@ -18,8 +18,8 @@ Covers:
 import pyarrow.parquet as pq
 import pytest
 
-from etl_framework.loaders.parquet_loader import ParquetLoader
 from etl_framework.exceptions.pipeline_errors import PermanentLoadError
+from etl_framework.loaders.parquet_loader import ParquetLoader
 
 
 class NoMaterializeIterator:

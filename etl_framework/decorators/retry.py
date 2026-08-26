@@ -23,13 +23,15 @@ Usage:
         ... 
 """
 
-import time 
-from functools import wraps 
-from etl_framework.config.models import RetryConfig 
+import time
+from functools import wraps
+
+from etl_framework.config.models import RetryConfig
 from etl_framework.exceptions.pipeline_errors import (
-    PermanentExtractionError, 
-    MaxRetriesExceededError, 
+    MaxRetriesExceededError,
+    PermanentExtractionError,
 )
+
 
 def retry(config: RetryConfig): 
     """Decorator factory. Accepts config and returns a decorator."""
