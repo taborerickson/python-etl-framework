@@ -26,10 +26,13 @@ build/
 # Testing & Coverage 
 .pytest_cache/ 
 .coverage 
+.coverage.*
 htmlcov/
 coverage.xml 
 *.cover 
 .hypothesis/ 
+.ruff_cache/ 
+ruff_findings.txt 
 
 # Environment 
 .env.*
@@ -47,6 +50,8 @@ coverage.xml
 .venv/*
 .test_env/*
 .test_env/ 
+# local CI verification virtual environment 
+.ci-venv/
 
 # output/ 
 output/*
