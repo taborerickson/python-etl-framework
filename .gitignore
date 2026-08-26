@@ -31,8 +31,8 @@ htmlcov/
 coverage.xml 
 *.cover 
 .hypothesis/ 
-.ruff_cache/ 
-ruff_findings.txt 
+.ruff_cache/
+ruff_findings.txt
 
 # Environment 
 .env.*
@@ -50,7 +50,7 @@ ruff_findings.txt
 .venv/*
 .test_env/*
 .test_env/ 
-# local CI verification virtual environment 
+# local CI verification virtual environment
 .ci-venv/
 
 # output/ 

@@ -38,14 +38,14 @@ select = ["E", "F", "I"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["etl_framework"] 
-branch = true 
+source = ["etl_framework"]
+branch = true
 
-[tool.coverage.report] 
-show_missing = true 
+[tool.coverage.report]
+show_missing = true
 exclude_lines = [
-    "pragma: no cover", 
-    "if TYPE_CHECKING:", 
-    "raise NotImplementedError", 
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
     "if __name__ == .__main__.:",
 ]
