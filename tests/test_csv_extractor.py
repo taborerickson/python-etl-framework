@@ -20,11 +20,11 @@ from unittest.mock import patch
 
 import pytest
 
-from etl_framework.extractors.csv import CSVExtractor
 from etl_framework.exceptions.pipeline_errors import (
-    SourceNotFoundError,
     MalformedFileError,
+    SourceNotFoundError,
 )
+from etl_framework.extractors.csv import CSVExtractor
 
 
 def test_extract_is_a_generator_function():

@@ -18,13 +18,14 @@ of real records. So the writer is created lazily, from the first batch's
 inferred schema, rather than up fron in __init__. 
 """
 
-from typing import Iterable 
+from typing import Iterable
 
-import pyarrow as pa 
-import pyarrow.parquet as pq 
+import pyarrow as pa
+import pyarrow.parquet as pq
 
-from etl_framework.base.loader import BaseLoader 
+from etl_framework.base.loader import BaseLoader
 from etl_framework.exceptions.pipeline_errors import PermanentLoadError
+
 
 # ParquetLoader 
 class ParquetLoader(BaseLoader): 

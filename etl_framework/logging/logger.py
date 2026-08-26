@@ -23,9 +23,11 @@ pipeline_run_id to its logger at initalization. Every subsequent log
 event from that instance carries those fields automatically. 
 """
 
-import logging 
-import sys 
-import structlog 
+import logging
+import sys
+
+import structlog
+
 
 # setup function 
 def configure_logging(

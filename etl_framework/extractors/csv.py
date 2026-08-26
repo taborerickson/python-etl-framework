@@ -22,14 +22,15 @@ Retry design:
     BaseExtractor's contract.  
 """
 
-import csv 
+import csv
 
-from etl_framework.base.extractor import BaseExtractor 
-from etl_framework.config.models import CSVConfig 
+from etl_framework.base.extractor import BaseExtractor
+from etl_framework.config.models import CSVConfig
 from etl_framework.exceptions.pipeline_errors import (
-    SourceNotFoundError,  
-    MalformedFileError, 
+    MalformedFileError,
+    SourceNotFoundError,
 )
+
 
 # CSVExtractor 
 class CSVExtractor(BaseExtractor): 

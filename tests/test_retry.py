@@ -23,10 +23,10 @@ import pytest
 
 from etl_framework.decorators.retry import retry
 from etl_framework.exceptions.pipeline_errors import (
-    TransientExtractionError,
-    PermanentExtractionError,
     MaxRetriesExceededError,
+    PermanentExtractionError,
     RateLimitError,
+    TransientExtractionError,
 )
 
 
