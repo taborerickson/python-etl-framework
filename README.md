@@ -1,3 +1,6 @@
+[![CI](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/taborerickson/654c6ab6bc0e515ac0212e459f67e62c/raw/etl-framework-coverage.json)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml)
+
 # Python ETL Framework - Modular Ingestion Library
 
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
