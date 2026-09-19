@@ -17,11 +17,12 @@ at once) and returns a count of what it wrote, rather than yielding
 anything onward. 
 """
 
-import time 
-from abc import ABC, abstractmethod 
-from typing import Iterable 
+import time
+from abc import ABC, abstractmethod
+from typing import Iterable
 
-from etl_framework.logging.logger import get_logger 
+from etl_framework.logging.logger import get_logger
+
 
 # BaseLoader(ABC) 
 class BaseLoader(ABC): 

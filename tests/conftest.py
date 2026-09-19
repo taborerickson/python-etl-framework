@@ -13,6 +13,7 @@ import pytest
 
 from etl_framework.config.models import APIConfig, CSVConfig, RetryConfig
 
+
 @pytest.fixture
 def make_retry_config():
     """Factory fixture: returns a function that builds a RetryConfig with

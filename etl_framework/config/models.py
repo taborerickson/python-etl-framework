@@ -14,10 +14,13 @@ Hierarchy:
         CSVConfig -- extends ExtractorConfig for CSV file sources 
 """
 
-from pydantic import BaseModel, ConfigDict, Field 
-from datetime import datetime, timezone 
-from uuid import uuid4 
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from etl_framework.exceptions.pipeline_errors import TransientExtractionError
+
 
 # auto-generated pipeline_run_id 
 def _generate_pipeline_run_id() -> str: 

@@ -27,16 +27,16 @@ from unittest.mock import patch
 import pytest
 import responses
 
-from etl_framework.extractors.rest_api import RestApiExtractor
 from etl_framework.exceptions.pipeline_errors import (
-    NetworkError,
-    ServerError,
-    RateLimitError,
     AuthenticationError,
-    SourceNotFoundError,
     MalformedResponseError,
     MaxRetriesExceededError,
+    NetworkError,
+    RateLimitError,
+    ServerError,
+    SourceNotFoundError,
 )
+from etl_framework.extractors.rest_api import RestApiExtractor
 
 URL = "https://api.example.com/records"
 

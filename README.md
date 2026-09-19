@@ -1,4 +1,5 @@
 # Python ETL Framework - Modular Ingestion Library
+[![CI](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml) [![Branch coverage gate: 95% minimum](https://img.shields.io/badge/branch%20coverage%20gate-95%25-brightgreen)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml)
 
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
 Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and full unit test coverage. 

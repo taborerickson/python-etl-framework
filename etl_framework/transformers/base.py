@@ -15,8 +15,9 @@ The pipeline would only be 'streaming' at the extractor, defeating the point for
 any dataset too large to fit in memory. 
 """
 
-from abc import ABC, abstractmethod 
-from typing import Iterable, Iterator 
+from abc import ABC, abstractmethod
+from typing import Iterable, Iterator
+
 
 # BaseTransformer (ABC) 
 class BaseTransformer(ABC): 

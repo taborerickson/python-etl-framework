@@ -20,13 +20,12 @@ import pytest
 from pydantic import ValidationError
 
 from etl_framework.config.models import (
-    RetryConfig,
-    ExtractorConfig,
     APIConfig,
     CSVConfig,
+    ExtractorConfig,
+    RetryConfig,
 )
 from etl_framework.exceptions.pipeline_errors import TransientExtractionError
-
 
 #-------------------------------------------------------------------------
 # Required-field / fail-fast validation 
