@@ -18,7 +18,8 @@ This framework serves as the ingestion layer for the Sales-Intelligence-Pipeline
 - [Installation](#installation)  
 - [Usage](#usage)  
 - [Configuration](#configuration)  
-- [Testing Strategy](#testing-strategy) 
+- [Testing Strategy](#testing-strategy)
+- [Continuous Integration](#continuous-integration)
 - [Key Design Decisions & Trade-offs](#key-design-decisions--trade-offs) 
 - [Skills Demonstrated](#skills-demonstrated) 
 
@@ -131,7 +132,7 @@ python-etl-framework/
 │
 ├── .github/ 
 │   ├── workflows/ 
-│   └── ci.yml                      # Ruff, Python 3.11/3.12 tests, coverage gate and artifacts 
+│       └── ci.yml                  # Ruff, Python 3.11/3.12 tests, coverage gate and artifacts 
 │
 ├── examples/
 │   └── api_to_parquet.py           # End-to-end usage example - runnable
