@@ -2,7 +2,7 @@
 [![CI](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml) [![Branch coverage gate: 95% minimum](https://img.shields.io/badge/branch%20coverage%20gate-95%25-brightgreen)](https://github.com/taborerickson/python-etl-framework/actions/workflows/ci.yml)
 
 The focus of this project is creating a reusable, installable Python ETL framework built for production-grade data engineering workflows. 
-Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and full unit test coverage. 
+Rather than a collection of scripts, this is a structured library with abstract base classes, concrete implementations, Pydantic configuration management, retry logic with exponential backoff, structured logging, and automated quality gates. Every pull request targeting `main` and every push to `main` triggers GitHub Actions CI that runs Ruff and the full 91-test pytest suite on Python 3.11 and 3.12, enforces a 95% minimum combined branch-coverage threshold, and uploads a coverage artifact for each matrix version.  
 
 This framework serves as the ingestion layer for the Sales-Intelligence-Pipeline project - a medallion-architecture ETL pipeline with dbt, Airflow, and a RAG/AI layer. The Sales Intelligence Pipeline project's Bronze ingestion layer imports directly from this library. 
 
@@ -116,7 +116,7 @@ python-etl-framework/
 │       ├── __init__.py
 │       └── logger.py               # structlog setup  
 │
-├── tests/                          # 10 files, 91 tests, 99% coverage 
+├── tests/                          # 10 files, 91 tests, 95% branch-coverage gate in CI 
 │   ├── __init__.py
 │   ├── conftest.py                 # Shared factory fixtures + payload-shape fixtures
 │   ├── test_exceptions.py          # 22 tests
@@ -128,6 +128,10 @@ python-etl-framework/
 │   ├── test_parquet_loader.py      # 5 tests 
 │   ├── test_transformers.py        # 4 tests 
 │   └── test_logging_config.py      # 6 tests 
+│
+├── .github/ 
+│   ├── workflows/ 
+│   └── ci.yml                      # Ruff, Python 3.11/3.12 tests, coverage gate and artifacts 
 │
 ├── examples/
 │   └── api_to_parquet.py           # End-to-end usage example - runnable
@@ -457,14 +461,14 @@ config = APIConfig(
 # Run all tests
 pytest
 
-# Run with coverage report
-pytest --cov=etl_framework --cov-report=term-missing
+# Run the same branch-coverage gate used in CI
+pytest --cov=etl_framework --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=95
 
 # Run a specific test file
 pytest tests/test_retry.py -v
 ```
 
-**Result: 91 tests, all passing, 99% statement coverage (306/308 lines).** The two uncovered lines are the `raise NotImplementedError` bodies of `BaseLoader.load()` and `BaseTransformer.transform()`. These are unreachable by design, since Python's `abstractmethod` machinery prevents instantiating a subclass that doesn't override them.
+**Result: 91 tests, all passing; 306 statements with zero missed; 46 branches with one partial; 99.72% combined branch coverage.** Coverage.py displays the aggregate result as 99% rather than rounding it up to 100%. The remaining partial branch is `etl_framework/loaders/parquet_loader.py`, arc `71->74`. CI runs the same suite on Python 3.11 and 3.12 and enforces a 95% minimum combined branch-coverage threshold.
 
 Every HTTP interaction is mocked via `responses` (zero real network calls in the suite). Every retry/backoff scenario, including a 60-second backoff cap and a 17-second `Retry-After` wait, is mocked via `unittest.mock.patch` on `time.sleep`, so the full suite runs in well under half a second despite testing behavior that would otherwise take tens of real seconds.
 
@@ -482,6 +486,19 @@ Every HTTP interaction is mocked via `responses` (zero real network calls in the
 | `test_transformers.py` | 4 | Generator behavior and explicit laziness proof |
 | `test_logging_config.py` | 6 | `configure_logging()` across level/environment combinations |
 | `conftest.py` | N/A | Shared fixtures used across the suite |
+
+---
+
+## Continuous Integration 
+
+GitHub Actions runs on every pull request targeting `main` and every push to `main`. The workflow: 
+- Runs Ruff using the configured `E`, `F`, and `I` rule families
+- Runs the full 91-test pytest suite on Python 3.11 and 3.12
+- Measures branch coverage and enforces a 95% minimum combined coverage threshold
+- Uploads `coverage.xml` as a separate artifact for each Python version
+- Cancels superseded runs for the same workflow and Git reference
+
+The active `Protect main` ruleset requires both `test (3.11)` and `test (3.12)` to pass on an up-to-date pull request before changes can be merged. This workflow provides continuous integration only; it does not deploy releases, promote environments, or implement continuous delivery. 
 
 ---
 
@@ -548,6 +565,11 @@ Some APIs return HTTP `200` with an error condition described inside the JSON bo
 | Pydantic: config validation, nested models, `default_factory` | `config/models.py` |
 | Structured logging: context binding, key-value output | `logging/logger.py`, `base/extractor.py` |
 | Unit testing: pytest, mocking (`unittest.mock.patch`), fixtures | `tests/` |
+| GitHub Actions continuous integration: push and pull-request triggers, read-only permissions, and concurrency cancellation | `.github/workflows/ci.yml` | 
+| Python-version matrix testing on Python 3.11 and 3.12 | `.github/workflows/ci.yml` | 
+| Automated quality gates: Ruff, pytest, and a 95% minimum branch-coverage threshold | `.github/workflows/ci.yml`, `pyproject.toml` | 
+| Coverage-report generation and per-version artifact upload | `.github/workflows/ci.yml` | 
+| Protected-branch workflow with required, up-to-date status checks | `Protect main` repository ruleset; `test (3.11)` and `test (3.12)` | 
 | Package structure and tooling: `pyproject.toml`, editable install | `pyproject.toml` |
 | `raise ... from e` exception chaining | `decorators/retry.py`, `extractors/rest_api.py` |
 
